@@ -1,0 +1,30 @@
+# Local development only — NOT used in production (Railway runs Postgres
+# and Redis as separate managed services; this file exists purely so a
+# developer's machine can run `docker compose up` and get a working
+# Postgres+pgvector and Redis instantly, without installing either by hand.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: flagfix
+      POSTGRES_PASSWORD: flagfix
+      POSTGRES_DB: flagfix
+    ports:
+      - "5432:5432"
+    volumes:
+      - flagfix_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flagfix"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  flagfix_postgres_data:
