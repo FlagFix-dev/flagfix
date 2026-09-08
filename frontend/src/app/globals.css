@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background-color: #f7f8fa; /* ink-50 */
+}
+
+* {
+  border-color: theme("colors.ink.100");
+}

@@ -6,8 +6,8 @@ against existing reports → clusters duplicates → scores priority → routes
 to the right team → tracks to resolution → reporter confirms it's actually
 fixed.
 
-See `/backend/README.md` for how to run the API locally. The frontend
-(Next.js) lands in this repo next.
+See `/backend/README.md` for how to run the API locally, and
+`/frontend/README.md` for the web app.
 
 ## Status
 
@@ -22,5 +22,8 @@ See `/backend/README.md` for how to run the API locally. The frontend
       aren't configured yet
 - [x] Resolution workflow state machine + reopen-on-disagreement loop
 - [x] Automated tests (16 passing, including a real-database clustering test)
-- [ ] Frontend (Next.js) — next up
+- [x] Frontend (Next.js 15 + TypeScript + Tailwind): onboarding, auth,
+      role-aware dashboard, report submission, status workflow, resolution
+      feedback — see `frontend/README.md`
 - [ ] Deployed to Railway/Vercel
+- [ ] Photo attachments persisted to cloud storage (R2/S3)
