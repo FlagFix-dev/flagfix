@@ -47,10 +47,20 @@ export interface OrgCreateRequest {
   org_name: string;
   org_slug: string;
   org_type: OrgType;
+  address: string;
+  city: string;
+  state: string;
+  num_blocks?: number | null;
   owner_name: string;
   owner_email: string;
   owner_password: string;
 }
+
+/** The two roles a person can claim for themselves on the signup form.
+ * `admin`/`owner` are never offered here — see backend/app/api/auth.py's
+ * signup(), which enforces the same restriction server-side regardless of
+ * what a client sends. */
+export type SelfSignupRole = "reporter" | "resolver";
 
 export interface LocationResponse {
   id: string;

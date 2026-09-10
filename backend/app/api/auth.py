@@ -35,11 +35,12 @@ async def signup(payload: SignupRequest, session: AsyncSession = Depends(get_ses
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "An account with that email already exists.")
 
-    # MVP simplification: anyone can self-signup as `reporter`. Elevated
-    # roles (resolver/admin) are granted later by an org owner/admin via a
-    # role-management endpoint (Phase 2) — self-signup can never grant
-    # yourself admin, even if the client sends a different role.
-    role = UserRole.reporter
+    # Self-signup may only claim `reporter` (student) or `resolver` (staff)
+    # — both are "join and use the app" roles with no organization-admin
+    # power. `admin`/`owner` are never grantable here, even if the client
+    # sends one; those are only created via org creation (owner) or granted
+    # later by an existing admin/owner (Phase 2 role-management endpoint).
+    role = payload.role if payload.role in (UserRole.reporter, UserRole.resolver) else UserRole.reporter
 
     user = User(name=payload.name, email=payload.email, password_hash=hash_password(payload.password))
     session.add(user)

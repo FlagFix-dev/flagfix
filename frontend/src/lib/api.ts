@@ -9,6 +9,7 @@ import type {
   ProblemCreateRequest,
   ProblemResponse,
   ProblemStatus,
+  SelfSignupRole,
   StatusChangeRequest,
   TokenResponse,
 } from "./types";
@@ -127,8 +128,13 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 // --- Auth -------------------------------------------------------------
 
 export const authApi = {
-  signup: (input: { name: string; email: string; password: string; org_slug: string }) =>
-    request<TokenResponse>("/api/auth/signup", { method: "POST", body: input, auth: false }),
+  signup: (input: {
+    name: string;
+    email: string;
+    password: string;
+    org_slug: string;
+    role: SelfSignupRole;
+  }) => request<TokenResponse>("/api/auth/signup", { method: "POST", body: input, auth: false }),
 
   login: (input: { email: string; password: string; org_slug: string }) =>
     request<TokenResponse>("/api/auth/login", { method: "POST", body: input, auth: false }),

@@ -20,6 +20,18 @@ class Organization(Base, UUIDPKMixin, TimestampMixin):
     type: Mapped[OrgType] = mapped_column(nullable=False)
     plan: Mapped[OrgPlan] = mapped_column(nullable=False, default=OrgPlan.starter)
 
+    # Profile fields captured at onboarding. All optional at the model/DB
+    # level (an org row must always be creatable even if one is blank) —
+    # `OrgCreateRequest` in schemas/org.py is what actually makes address/
+    # city/state required on the signup form itself.
+    address: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    state: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # How many blocks/buildings/hostels the institution has — purely
+    # descriptive metadata for the owner's own reference; it does not
+    # constrain how many Location rows they actually create below.
+    num_blocks: Mapped[Optional[int]] = mapped_column(nullable=True)
+
     locations: Mapped[list["Location"]] = relationship(back_populates="organization")
     departments: Mapped[list["Department"]] = relationship(back_populates="organization")
 

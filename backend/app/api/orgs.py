@@ -49,7 +49,15 @@ async def create_organization(
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "That workspace URL is already taken.")
 
-    org = Organization(name=payload.org_name, slug=payload.org_slug, type=payload.org_type)
+    org = Organization(
+        name=payload.org_name,
+        slug=payload.org_slug,
+        type=payload.org_type,
+        address=payload.address,
+        city=payload.city,
+        state=payload.state,
+        num_blocks=payload.num_blocks,
+    )
     session.add(org)
     await session.flush()
 

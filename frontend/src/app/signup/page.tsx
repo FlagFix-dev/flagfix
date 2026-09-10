@@ -9,6 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/alert";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import type { SelfSignupRole } from "@/lib/types";
+
+const ROLE_OPTIONS: { value: SelfSignupRole; label: string; hint: string }[] = [
+  { value: "reporter", label: "Student", hint: "Report problems, track your own reports" },
+  { value: "resolver", label: "Staff", hint: "View and resolve reports for the whole institution" },
+];
 
 export default function SignupPage() {
   const { signup } = useAuth();
@@ -18,6 +25,7 @@ export default function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<SelfSignupRole>("reporter");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -26,7 +34,7 @@ export default function SignupPage() {
     setError(null);
     setLoading(true);
     try {
-      await signup({ org_slug: orgSlug, name, email, password });
+      await signup({ org_slug: orgSlug, name, email, password, role });
       router.push("/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
@@ -80,6 +88,35 @@ export default function SignupPage() {
               onChange={(e) => setPassword(e.target.value)}
             />
             <p className="mt-1 text-xs text-ink-500">At least 8 characters.</p>
+          </div>
+
+          <div>
+            <Label>I am a...</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {ROLE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setRole(opt.value)}
+                  className={cn(
+                    "rounded-xl border px-3 py-2.5 text-left transition-colors",
+                    role === opt.value
+                      ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500"
+                      : "border-ink-200 bg-white hover:bg-ink-50"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "block text-sm font-medium",
+                      role === opt.value ? "text-brand-700" : "text-ink-800"
+                    )}
+                  >
+                    {opt.label}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-ink-500">{opt.hint}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           <Button type="submit" size="lg" className="w-full" loading={loading}>

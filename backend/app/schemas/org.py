@@ -12,6 +12,13 @@ class OrgCreateRequest(BaseModel):
     org_name: str = Field(min_length=2, max_length=200)
     org_slug: str = Field(min_length=3, max_length=80, pattern=r"^[a-z0-9-]+$")
     org_type: OrgType
+    address: str = Field(min_length=3, max_length=300)
+    city: str = Field(min_length=1, max_length=100)
+    state: str = Field(min_length=1, max_length=100)
+    # Descriptive only (see Organization.num_blocks) — how many blocks,
+    # buildings, or hostel wings the institution has, before they name each
+    # one individually on the Locations screen after signup.
+    num_blocks: int | None = Field(default=None, ge=0, le=500)
     owner_name: str = Field(min_length=1, max_length=150)
     owner_email: EmailStr
     owner_password: str = Field(min_length=8, max_length=128)

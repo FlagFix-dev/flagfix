@@ -56,3 +56,21 @@ export function priorityBucketFor(score: number): PriorityBucket {
 }
 
 export const STAFF_ROLES: UserRole[] = ["resolver", "admin", "owner"];
+
+/** Copy for the "how many blocks" field on the onboarding form — worded to
+ * match how each institution type actually talks about its own layout. */
+export const NUM_BLOCKS_LABEL: Record<OrgType, string> = {
+  school: "Number of buildings/blocks",
+  college: "Number of buildings/blocks",
+  university: "Number of buildings/blocks",
+  hostel: "Number of hostel blocks",
+  pg: "Number of blocks/wings",
+};
+
+export const NUM_BLOCKS_HINT: Record<OrgType, string> = {
+  school: "e.g. Main Building, Science Block, Admin Block",
+  college: "e.g. Main Building, Library Block, Hostel Block",
+  university: "e.g. Academic Block, Library, Hostel Block A",
+  hostel: "e.g. Block A, Block B, Block C",
+  pg: "e.g. Wing A, Wing B, Ground Floor",
+};

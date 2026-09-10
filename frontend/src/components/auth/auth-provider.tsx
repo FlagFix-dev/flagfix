@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useRouter } from "next/navigation";
 import { authApi, orgsApi } from "@/lib/api";
 import { clearSession, getCurrentClaims, saveSession } from "@/lib/session";
-import type { JwtPayload, OrgCreateRequest } from "@/lib/types";
+import type { JwtPayload, OrgCreateRequest, SelfSignupRole } from "@/lib/types";
 
 interface AuthContextValue {
   claims: JwtPayload | null;
@@ -12,7 +12,13 @@ interface AuthContextValue {
    * lets pages avoid a flash of "logged out" content during hydration. */
   initializing: boolean;
   login: (input: { email: string; password: string; org_slug: string }) => Promise<void>;
-  signup: (input: { name: string; email: string; password: string; org_slug: string }) => Promise<void>;
+  signup: (input: {
+    name: string;
+    email: string;
+    password: string;
+    org_slug: string;
+    role: SelfSignupRole;
+  }) => Promise<void>;
   createOrg: (input: OrgCreateRequest) => Promise<void>;
   logout: () => void;
 }

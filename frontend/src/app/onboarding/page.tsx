@@ -10,7 +10,7 @@ import { Select } from "@/components/ui/select";
 import { Alert } from "@/components/ui/alert";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ApiError } from "@/lib/api";
-import { ORG_TYPE_LABELS } from "@/lib/constants";
+import { NUM_BLOCKS_HINT, NUM_BLOCKS_LABEL, ORG_TYPE_LABELS } from "@/lib/constants";
 import type { OrgType } from "@/lib/types";
 
 function slugify(value: string): string {
@@ -30,6 +30,10 @@ export default function OnboardingPage() {
   const [orgSlug, setOrgSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const [orgType, setOrgType] = useState<OrgType>("college");
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [numBlocks, setNumBlocks] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
   const [ownerPassword, setOwnerPassword] = useState("");
@@ -50,6 +54,10 @@ export default function OnboardingPage() {
         org_name: orgName,
         org_slug: orgSlug,
         org_type: orgType,
+        address,
+        city,
+        state,
+        num_blocks: numBlocks ? Number(numBlocks) : null,
         owner_name: ownerName,
         owner_email: ownerEmail,
         owner_password: ownerPassword,
@@ -119,6 +127,45 @@ export default function OnboardingPage() {
                 </option>
               ))}
             </Select>
+          </div>
+
+          <div>
+            <Label htmlFor="address">Address</Label>
+            <Input
+              id="address"
+              required
+              placeholder="Street / area"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="city">City</Label>
+              <Input id="city" required value={city} onChange={(e) => setCity(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="state">State</Label>
+              <Input id="state" required value={state} onChange={(e) => setState(e.target.value)} />
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="numBlocks">{NUM_BLOCKS_LABEL[orgType]} (optional)</Label>
+            <Input
+              id="numBlocks"
+              type="number"
+              min={0}
+              max={500}
+              placeholder="e.g. 5"
+              value={numBlocks}
+              onChange={(e) => setNumBlocks(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-ink-500">
+              Just for your own reference — {NUM_BLOCKS_HINT[orgType]}. You'll name each one on
+              the Locations page after this.
+            </p>
           </div>
 
           <hr className="border-ink-100" />
