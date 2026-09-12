@@ -24,11 +24,11 @@ Thresholds (tune these based on real pilot data, not guesswork forever):
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.problem import Problem, ProblemCluster, ProblemEmbedding, ProblemRelationship
-from app.models.enums import ClusterStatus, RelationshipType
+from app.models.enums import ClusterStatus, ProblemStatus, RelationshipType
 
 AUTO_MATCH_THRESHOLD = 0.82
 REVIEW_THRESHOLD = 0.70
@@ -98,9 +98,15 @@ async def attach_to_cluster_or_create(
 
     now = datetime.now(timezone.utc)
 
+    cluster: ProblemCluster | None = None
     if best.problem.cluster_id is not None:
         cluster = await session.get(ProblemCluster, best.problem.cluster_id)
-    else:
+
+    # `cluster is None` covers both "the match had no cluster" and the
+    # should-never-happen case of a cluster_id pointing at a row that no
+    # longer exists — without this second guard that dangling id would
+    # crash report submission with an AttributeError further down.
+    if cluster is None:
         # The best match is itself a lone report with no cluster yet — this
         # new report is the *second* report of the same issue, so a cluster
         # is born right here.
@@ -133,3 +139,88 @@ async def attach_to_cluster_or_create(
     problem.cluster_id = cluster.id
 
     return cluster
+
+
+async def resync_cluster_member_priorities(
+    session: AsyncSession, *, cluster: ProblemCluster
+) -> None:
+    """
+    Re-scores every open report in a cluster against the cluster's CURRENT
+    counters.
+
+    Priority is otherwise computed once, at insert, from whatever the
+    cluster looked like at that instant — so the first person to report a
+    problem that 20 people later report keeps a "1 person affected" score
+    forever, and sinks to the bottom of a queue sorted by priority. That is
+    precisely backwards: the oldest report of a widespread problem has been
+    waiting the longest.
+
+    Resolved and closed reports are deliberately left alone — re-prioritising
+    finished work would churn history for no benefit.
+    """
+    # Imported here rather than at module scope: priority imports nothing
+    # from this module, but keeping the dependency local documents that
+    # similarity owns the clustering, not the scoring rules.
+    from app.services import priority as priority_service
+
+    # The session runs with autoflush=False (see db.py), and the caller has
+    # usually just assigned cluster_id to the new report and its match
+    # in memory. Without an explicit flush this SELECT reads the pre-change
+    # database state, finds none of them, and silently re-scores nothing.
+    await session.flush()
+
+    members = (
+        await session.execute(
+            select(Problem).where(
+                Problem.cluster_id == cluster.id,
+                Problem.status.not_in([ProblemStatus.resolved, ProblemStatus.closed]),
+            )
+        )
+    ).scalars().all()
+
+    for member in members:
+        score, _bucket, reasons = priority_service.compute_priority(
+            severity=member.severity,
+            urgency=member.urgency,
+            safety_flag=member.safety_flag,
+            affected_users_estimate=cluster.affected_users_estimate,
+            recurrence_count=cluster.recurrence_count,
+        )
+        member.priority_score = score
+        member.priority_reasons = reasons
+
+
+async def sync_cluster_status(session: AsyncSession, *, cluster_id: uuid.UUID | None) -> None:
+    """
+    Marks a cluster resolved once every report in it is resolved or closed.
+
+    Without this, ClusterStatus.resolved is never set by any code path,
+    which quietly disables the entire recurrence feature: the "this problem
+    came back" branch in attach_to_cluster_or_create only fires against a
+    RESOLVED cluster, so recurrence_count stays 0 forever and the
+    "times it came back" figure shown to owners is permanently meaningless.
+    """
+    if cluster_id is None:
+        return
+
+    cluster = await session.get(ProblemCluster, cluster_id)
+    if cluster is None:
+        return
+
+    # Same autoflush=False concern as resync_cluster_member_priorities: the
+    # status change that prompted this call is typically still pending in
+    # the session, and the count below must see it.
+    await session.flush()
+
+    open_members = (
+        await session.execute(
+            select(func.count())
+            .select_from(Problem)
+            .where(
+                Problem.cluster_id == cluster_id,
+                Problem.status.not_in([ProblemStatus.resolved, ProblemStatus.closed]),
+            )
+        )
+    ).scalar_one()
+
+    cluster.status = ClusterStatus.resolved if open_members == 0 else ClusterStatus.open

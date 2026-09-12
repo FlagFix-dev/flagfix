@@ -21,7 +21,17 @@ _DEFAULT_TARGET_HOURS: dict[PriorityBucket, int] = {
 async def compute_sla_due_at(
     session: AsyncSession, *, org_id: uuid.UUID, bucket: PriorityBucket
 ) -> datetime:
-    stmt = select(SLARule).where(SLARule.org_id == org_id, SLARule.priority_bucket == bucket)
-    rule = (await session.execute(stmt)).scalar_one_or_none()
+    # `.first()` rather than one-or-none on purpose: nothing in the schema
+    # stops an org from ending up with two rules for the same bucket, and
+    # this runs on every single report submission — a raised
+    # MultipleResultsFound here would break intake for the whole
+    # institution. Extra rules are ignored, the earliest one wins.
+    stmt = (
+        select(SLARule)
+        .where(SLARule.org_id == org_id, SLARule.priority_bucket == bucket)
+        .order_by(SLARule.created_at)
+        .limit(1)
+    )
+    rule = (await session.execute(stmt)).scalars().first()
     target_hours = rule.target_hours if rule is not None else _DEFAULT_TARGET_HOURS[bucket]
     return datetime.now(timezone.utc) + timedelta(hours=target_hours)

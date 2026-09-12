@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -58,7 +59,9 @@ async def signup(payload: SignupRequest, session: AsyncSession = Depends(get_ses
     if role == UserRole.resolver:
         submitted_code = (payload.staff_code or "").strip().upper()
         expected_code = (org.staff_code or "").strip().upper()
-        if not expected_code or submitted_code != expected_code:
+        # compare_digest rather than `!=` so the comparison time doesn't
+        # depend on how many leading characters matched.
+        if not expected_code or not secrets.compare_digest(submitted_code, expected_code):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
                 "That staff code doesn't match this institution. Check with your admin for the correct code.",
@@ -124,10 +127,16 @@ async def refresh(payload: RefreshRequest, session: AsyncSession = Depends(get_s
     if role_row is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account no longer belongs to that organization.")
 
+    # `is_active` must be re-checked here, not only at login: a refresh
+    # token lives for 30 days and each refresh mints a fresh one, so
+    # without this check, deactivating an account never actually cuts off
+    # access — the user simply refreshes forever.
     user = await session.get(User, user_id)
-    if user is not None:
-        _touch_last_seen(user)
-        await session.commit()
+    if user is None or not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account has been deactivated.")
+
+    _touch_last_seen(user)
+    await session.commit()
 
     return TokenResponse(
         access_token=create_access_token(user_id=user_id, org_id=org_id, role=role_row.role.value),

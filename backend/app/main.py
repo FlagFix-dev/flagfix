@@ -29,6 +29,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Largest request body we will accept, anywhere. Sized to comfortably fit
+# the biggest legitimate upload (5 files, the largest of which may be a
+# 40MB video — see services/storage.py) with headroom for multipart
+# overhead.
+MAX_REQUEST_BYTES = 60 * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_request_size(request: Request, call_next):
+    """
+    Rejects oversized requests before anything reads the body.
+
+    This has to live in middleware rather than in the upload endpoint,
+    because FastAPI parses (and spools to disk) the entire multipart body
+    while resolving dependencies — which happens BEFORE the authentication
+    dependency runs. Without this, an unauthenticated caller can make the
+    server write an arbitrarily large file to disk just by posting to the
+    upload URL.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > MAX_REQUEST_BYTES:
+                return JSONResponse(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    content={"detail": "That upload is too large."},
+                )
+        except ValueError:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"detail": "Invalid Content-Length header."},
+            )
+    return await call_next(request)
+
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

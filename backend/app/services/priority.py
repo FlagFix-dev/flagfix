@@ -34,6 +34,27 @@ def compute_priority(
     )
     score = _clamp(score)
 
+    # --- Safety floors -------------------------------------------------
+    # A weighted average alone systematically under-rates the reports that
+    # matter most. A live exposed wire reported by ONE person scores 72
+    # under the formula above (High, 4-hour SLA) because the affected-users
+    # and recurrence components are near zero — it takes ten people
+    # reporting the same hazard to cross Critical. That is exactly backwards
+    # for physical danger: the first report of a live wire deserves the
+    # fastest response, not the tenth.
+    #
+    # So a safety flag sets a FLOOR rather than contributing one weighted
+    # term among five. Severe + dangerous is Critical on the first report;
+    # any flagged safety risk is at minimum High.
+    safety_floor_applied: str | None = None
+    if safety_flag:
+        if severity >= 70 and score < 85:
+            score = 85
+            safety_floor_applied = "critical"
+        elif score < 65:
+            score = 65
+            safety_floor_applied = "high"
+
     bucket = _bucket_for(score)
     reasons = _explain(
         severity=severity,
@@ -42,6 +63,7 @@ def compute_priority(
         affected_users_estimate=affected_users_estimate,
         recurrence_count=recurrence_count,
         score=score,
+        safety_floor_applied=safety_floor_applied,
     )
     return score, bucket, reasons
 
@@ -62,13 +84,23 @@ def _bucket_for(score: int) -> PriorityBucket:
 
 def _explain(
     *, severity: int, urgency: int, safety_flag: bool, affected_users_estimate: int,
-    recurrence_count: int, score: int,
+    recurrence_count: int, score: int, safety_floor_applied: str | None = None,
 ) -> dict:
     """Plain-language reasons, rendered directly in the admin UI as the
     "Why is this priority?" callout. Always includes at least one reason,
     even for a Low-priority report, so the score is never a black box."""
     reasons: list[str] = []
-    if safety_flag:
+    if safety_floor_applied == "critical":
+        reasons.append(
+            "Raised to Critical automatically: a potential safety risk was detected on a "
+            "severe report, so it doesn't wait for more people to report it"
+        )
+    elif safety_floor_applied == "high":
+        reasons.append(
+            "Raised to High automatically: any potential safety risk gets a minimum priority "
+            "regardless of how many people reported it"
+        )
+    elif safety_flag:
         reasons.append("Potential safety risk detected")
     if affected_users_estimate >= 3:
         reasons.append(f"{affected_users_estimate} people appear to be affected")

@@ -17,6 +17,7 @@ the bucket — acceptable at MVP scale given the size caps below.
 import logging
 import uuid
 
+import anyio.to_thread
 from fastapi import UploadFile
 
 from app.config import get_settings
@@ -84,22 +85,41 @@ async def save_upload(org_id: uuid.UUID, file: UploadFile) -> tuple[str, str]:
             "MP4/WEBM/MOV videos."
         )
 
+    # Read in chunks and abort the moment the limit is crossed, rather than
+    # `await file.read()` on the whole thing and checking the size after.
+    # The naive version means anyone with an account can push an
+    # arbitrarily large file straight into this process's memory and
+    # OOM-kill the API for every institution at once — the size check
+    # arrives far too late to prevent it.
     limit = MAX_IMAGE_BYTES if content_type in ALLOWED_IMAGE_TYPES else MAX_VIDEO_BYTES
-    data = await file.read()
-    if len(data) > limit:
-        limit_mb = limit // (1024 * 1024)
-        raise UploadRejected(f"'{file.filename}' is too large — the limit is {limit_mb}MB for this file type.")
-    if len(data) == 0:
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(64 * 1024):
+        total += len(chunk)
+        if total > limit:
+            limit_mb = limit // (1024 * 1024)
+            raise UploadRejected(
+                f"'{file.filename}' is too large — the limit is {limit_mb}MB for this file type."
+            )
+        chunks.append(chunk)
+
+    if total == 0:
         raise UploadRejected(f"'{file.filename}' appears to be empty.")
+    data = b"".join(chunks)
 
     key = f"{org_id}/{uuid.uuid4().hex}{_extension_for(content_type)}"
 
     try:
-        _client().put_object(
-            Bucket=settings.storage_bucket_name,
-            Key=key,
-            Body=data,
-            ContentType=content_type,
+        # boto3 is synchronous; uploading a 40MB video directly from this
+        # async function would block the worker's event loop for the whole
+        # transfer, stalling every other request on the process.
+        await anyio.to_thread.run_sync(
+            lambda: _client().put_object(
+                Bucket=settings.storage_bucket_name,
+                Key=key,
+                Body=data,
+                ContentType=content_type,
+            )
         )
     except Exception:  # noqa: BLE001 — a storage-provider outage must not 500 the request
         logger.exception("Object storage upload failed for key %s", key)

@@ -8,7 +8,10 @@ from app.models.enums import UserRole
 class SignupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    # Capped at 72, not 128: bcrypt silently ignores everything past 72
+    # bytes, so allowing longer gives people a false sense of security —
+    # a 100-character passphrase would be no stronger than its first 72.
+    password: str = Field(min_length=8, max_length=72)
     org_slug: str
     role: UserRole = UserRole.reporter
     # Required only when role == resolver (staff) — the owner's institute

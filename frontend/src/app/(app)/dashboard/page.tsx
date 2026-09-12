@@ -11,7 +11,7 @@ import { ProblemList } from "@/components/problems/problem-list";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ApiError, orgsApi, problemsApi } from "@/lib/api";
 import { ADMIN_ROLES, STATUS_LABELS, STAFF_ROLES, isQuickFix, priorityBucketFor } from "@/lib/constants";
-import type { OrgStatsResponse, ProblemResponse, ProblemStatus } from "@/lib/types";
+import type { AiStatusResponse, OrgStatsResponse, ProblemResponse, ProblemStatus } from "@/lib/types";
 
 // A light "is this still fresh?" refresh for the staff queue and ops stats
 // — not a real-time websocket feed, just a periodic re-fetch so newly
@@ -57,7 +57,15 @@ export default function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<ProblemStatus | "">("");
   const [speedFilter, setSpeedFilter] = useState<"" | "quick" | "bigger">("");
   const [orgStats, setOrgStats] = useState<OrgStatsResponse | null>(null);
+  const [aiStatus, setAiStatus] = useState<AiStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Admins should know, unambiguously, whether the AI is actually running
+  // — fallback output looks like real analysis at a glance.
+  useEffect(() => {
+    if (!isAdmin) return;
+    problemsApi.aiStatus().then(setAiStatus).catch(() => undefined);
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!claims) return;
@@ -68,8 +76,21 @@ export default function DashboardPage() {
         ? problemsApi.list({ status: statusFilter || undefined })
         : problemsApi.listMine();
       fetcher
-        .then((rows) => !cancelled && setProblems(rows))
-        .catch((err) => !cancelled && setError(err instanceof ApiError ? err.message : "Could not load reports."));
+        .then((rows) => {
+          if (cancelled) return;
+          setProblems(rows);
+          // Clear a previous failure — otherwise one blip on the 45s poll
+          // leaves a red banner up for the rest of the session even though
+          // everything recovered.
+          setError(null);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err instanceof ApiError ? err.message : "Could not load reports.");
+          // Leave the list as an empty result rather than `null`, which
+          // renders "Loading…" forever underneath the error.
+          setProblems((prev) => prev ?? []);
+        });
 
       if (isAdmin) {
         orgsApi.getStats().then((s) => !cancelled && setOrgStats(s)).catch(() => undefined);
@@ -120,6 +141,17 @@ export default function DashboardPage() {
       </div>
 
       {error && <Alert tone="error">{error}</Alert>}
+
+      {isAdmin && aiStatus && (!aiStatus.extraction_enabled || !aiStatus.similarity_enabled) && (
+        <Alert tone="info">
+          <strong>AI is running in fallback mode.</strong>{" "}
+          {!aiStatus.extraction_enabled && !aiStatus.similarity_enabled
+            ? "Reports are being saved and tracked, but they aren't being read or grouped by AI — every report lands as \"Other\" at medium priority until API keys are configured."
+            : !aiStatus.extraction_enabled
+              ? "Reports aren't being read by the language model, so categories and severity are placeholder values."
+              : "Reports are being read by AI, but duplicate-grouping is off, so repeat reports of the same problem stay separate."}
+        </Alert>
+      )}
 
       {isStaff && stats && (
         <div className="grid grid-cols-3 gap-4">

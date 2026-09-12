@@ -9,8 +9,180 @@
 html,
 body {
   background-color: #f7f8fa; /* ink-50 */
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
   border-color: theme("colors.ink.100");
+}
+
+/* ---------------------------------------------------------------------
+   Depth & motion layer.
+
+   The design brief is "modern with some 3D, not 3D everywhere" — so the
+   depth here is real (layered shadows, perspective transforms, glass
+   blur) but applied to a small, deliberate set of surfaces: the hero,
+   stat tiles, primary buttons, and feature cards. Ordinary form fields
+   and list rows stay flat on purpose, because depth only reads as
+   premium when most of the page is calm.
+
+   Everything below respects prefers-reduced-motion at the bottom of the
+   file — animation is decoration, never the only way to understand the
+   page.
+   ------------------------------------------------------------------ */
+
+/* --- Glass surface: frosted, translucent, with a light top edge that
+   mimics a real bevel catching light. --- */
+.glass {
+  background: linear-gradient(
+    135deg,
+    rgb(255 255 255 / 0.85) 0%,
+    rgb(255 255 255 / 0.65) 100%
+  );
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgb(255 255 255 / 0.7);
+  box-shadow:
+    0 1px 0 0 rgb(255 255 255 / 0.9) inset,
+    0 10px 30px -12px rgb(16 24 40 / 0.18);
+}
+
+.glass-dark {
+  background: linear-gradient(135deg, rgb(37 47 137 / 0.9) 0%, rgb(109 40 217 / 0.9) 100%);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  box-shadow:
+    0 1px 0 0 rgb(255 255 255 / 0.18) inset,
+    0 18px 40px -16px rgb(53 73 214 / 0.55);
+}
+
+/* --- 3D tilt: the card leans toward the viewer on hover. Perspective
+   lives on the parent so the transform reads as rotation in space
+   rather than a flat skew. --- */
+.tilt-parent {
+  perspective: 1000px;
+}
+
+.tilt-card {
+  transform-style: preserve-3d;
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.tilt-card:hover {
+  transform: translateY(-6px) rotateX(4deg) rotateY(-4deg) scale(1.015);
+  box-shadow:
+    0 28px 50px -20px rgb(16 24 40 / 0.28),
+    0 10px 20px -12px rgb(53 73 214 / 0.22);
+}
+
+/* --- A simpler, calmer lift for surfaces that appear in long lists,
+   where a full tilt would be visually noisy. --- */
+.lift-card {
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.lift-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 32px -16px rgb(16 24 40 / 0.24);
+}
+
+/* --- Ambient gradient orbs used behind the hero. Blurred to the point
+   of being light rather than shapes, so text stays readable. --- */
+.orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(72px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -22px, 0) scale(1.06);
+  }
+}
+
+.animate-float-slow {
+  animation: float-slow 11s ease-in-out infinite;
+}
+
+.animate-float-slower {
+  animation: float-slow 16s ease-in-out infinite reverse;
+}
+
+/* --- Entrance animation. Elements start slightly below and rise into
+   place, which makes a dashboard feel assembled rather than dumped. --- */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* --- Live-status pulse ring, used on the "staff online" dot and the
+   live-update indicator. --- */
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(34 197 94 / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgb(34 197 94 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(34 197 94 / 0);
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2.2s ease-out infinite;
+}
+
+/* --- Shimmer sweep across the primary button on hover: a thin band of
+   light travelling left to right, the classic "premium product" cue. --- */
+@keyframes shine {
+  from {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(220%) skewX(-18deg);
+  }
+}
+
+.animate-shine {
+  animation: shine 0.9s ease-out;
+}
+
+/* Respect the OS-level reduced-motion setting: keep the depth, drop the
+   movement. Users who set this often do so for vestibular reasons. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-float-slow,
+  .animate-float-slower,
+  .animate-fade-up,
+  .animate-pulse-ring,
+  .animate-shine {
+    animation: none !important;
+  }
+
+  .tilt-card:hover,
+  .lift-card:hover {
+    transform: none;
+  }
 }

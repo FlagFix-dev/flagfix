@@ -30,7 +30,10 @@ voyageai==0.2.3
 boto3==1.35.24
 
 # --- Utilities ---
-python-multipart==0.0.9
+# 0.0.18+ required: earlier versions have an unauthenticated DoS
+# (CVE-2024-53981) reachable on any multipart endpoint, because the body is
+# parsed before authentication runs.
+python-multipart==0.0.18
 httpx==0.27.2
 tenacity==9.0.0
 

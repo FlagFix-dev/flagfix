@@ -103,7 +103,11 @@ export interface AttachmentResponse {
 
 export interface ProblemCreateRequest {
   description: string;
-  location_id: string;
+  /** Send exactly one of these two: a picked location, or a written one
+   * (when the reporter chooses "Somewhere else — not in this list"). The
+   * backend rejects both-or-neither. */
+  location_id?: string | null;
+  custom_location?: string | null;
   landmark?: string | null;
   attachments: AttachmentInput[];
 }
@@ -113,7 +117,10 @@ export interface ProblemResponse {
   title: string;
   description: string;
   landmark: string | null;
-  location_id: string;
+  location_id: string | null;
+  custom_location: string | null;
+  ai_reasoning: string | null;
+  ai_low_confidence: boolean;
   category_id: string | null;
   department_id: string | null;
   assigned_to_user_id: string | null;
@@ -159,6 +166,44 @@ export interface OrgProfileResponse {
   state: string | null;
   num_blocks: number | null;
   staff_code: string | null;
+}
+
+export type ClusterStatus = "open" | "resolved";
+
+export interface ClusterMemberResponse {
+  id: string;
+  title: string;
+  description: string;
+  created_at: string;
+  status: ProblemStatus;
+  location_id: string | null;
+  custom_location: string | null;
+}
+
+/** One underlying problem that several separate reports turned out to be
+ * describing — the visible output of the similarity engine. */
+export interface ClusterResponse {
+  id: string;
+  canonical_title: string;
+  status: ClusterStatus;
+  report_count: number;
+  affected_users_estimate: number;
+  recurrence_count: number;
+  first_reported_at: string;
+  last_reported_at: string;
+  category_id: string | null;
+  location_id: string | null;
+  top_priority_score: number;
+  members: ClusterMemberResponse[];
+}
+
+/** Whether the AI pipeline is actually running, or whether reports are
+ * going through the rule-based fallback. */
+export interface AiStatusResponse {
+  extraction_enabled: boolean;
+  similarity_enabled: boolean;
+  extraction_model: string | null;
+  embedding_model: string | null;
 }
 
 export interface OrgStatsResponse {

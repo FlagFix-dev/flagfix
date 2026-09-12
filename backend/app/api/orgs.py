@@ -173,8 +173,27 @@ async def create_category(
         if dept is None or dept.org_id != current_user.org_id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid department.")
 
+    # Duplicate category names are not merely untidy: report intake looks a
+    # category up by name, so a second "Other" (or "other") in the same org
+    # would break report submission for the whole institution. Rejected at
+    # the door, case-insensitively.
+    duplicate = (
+        await session.execute(
+            select(ProblemCategory).where(
+                ProblemCategory.org_id == current_user.org_id,
+                ProblemCategory.name.ilike(payload.name.strip()),
+            )
+        )
+    ).scalars().first()
+    if duplicate is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"A category called '{duplicate.name}' already exists."
+        )
+
     category = ProblemCategory(
-        org_id=current_user.org_id, name=payload.name, default_department_id=payload.default_department_id
+        org_id=current_user.org_id,
+        name=payload.name.strip(),
+        default_department_id=payload.default_department_id,
     )
     session.add(category)
     await session.commit()

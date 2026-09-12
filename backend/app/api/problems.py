@@ -6,19 +6,32 @@ runs, in order, against a real database and real AI provider calls.
 import uuid
 from datetime import datetime, timezone
 
+import anyio.to_thread
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_settings
 from app.deps import CurrentUser, get_current_user, get_tenant_db, require_role
 from app.models.catalog import ProblemCategory
 from app.models.enums import NotificationType, ProblemStatus, UserRole
-from app.models.problem import Assignment, Attachment, Problem, ProblemEmbedding, StatusHistory
-from app.models.tenancy import Location, User
+from app.models.problem import (
+    Assignment,
+    Attachment,
+    Problem,
+    ProblemCluster,
+    ProblemEmbedding,
+    StatusHistory,
+)
+from app.models.tenancy import Location, User, UserOrgRole
 from app.models.ops import Feedback
 from app.schemas.problem import (
+    AiStatusResponse,
+    AttachmentInput,
     AttachmentResponse,
+    ClusterMemberResponse,
+    ClusterResponse,
     FeedbackRequest,
     ProblemCreateRequest,
     ProblemResponse,
@@ -30,6 +43,44 @@ from app.services.storage import MAX_FILES_PER_REPORT, UploadRejected
 from app.services.workflow import InvalidTransitionError, assert_valid_transition
 
 router = APIRouter(prefix="/api/problems", tags=["problems"])
+
+
+def _validate_attachment_references(attachments: list[AttachmentInput]) -> None:
+    """
+    Guarantees every attachment URL a client submits actually points into
+    our own storage bucket, and carries a content type we accept.
+
+    Without this, `POST /api/problems` is an arbitrary-URL injection into
+    a page that staff open: a `javascript:` URL becomes script execution on
+    the FlagFix origin (session theft), and any external URL turns every
+    staff viewer into a tracking beacon for whoever hosts it. The upload
+    endpoint's validation does not cover this, because creating a problem
+    is a separate request that can simply skip the upload step.
+    """
+    if not attachments:
+        return
+
+    settings = get_settings()
+    if not settings.storage_configured:
+        # Nothing legitimate can have been uploaded, so nothing legitimate
+        # can be referenced.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Photo/video upload isn't turned on for this institution yet.",
+        )
+
+    allowed_prefix = settings.storage_public_base_url.rstrip("/") + "/"
+    for attachment in attachments:
+        if not attachment.url.startswith(allowed_prefix):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Attachments must be uploaded through FlagFix before they can be attached.",
+            )
+        if attachment.content_type.lower() not in storage.ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"'{attachment.content_type}' isn't a supported attachment type.",
+            )
 
 
 @router.post("/attachments", response_model=list[AttachmentResponse])
@@ -72,22 +123,46 @@ async def create_problem(
     session: AsyncSession = Depends(get_tenant_db),
 ) -> ProblemResponse:
     # --- Validate the location belongs to this org (defence in depth; the
-    # location picker in the UI should already only offer this org's tree) ---
-    location = await session.get(Location, payload.location_id)
-    if location is None or location.org_id != current_user.org_id:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid location for this organization.")
+    # location picker in the UI should already only offer this org's tree).
+    # A report with a custom ("somewhere else") location has no location_id
+    # at all, and skips this check — ProblemCreateRequest has already
+    # guaranteed exactly one of the two forms is present. ---
+    if payload.location_id is not None:
+        location = await session.get(Location, payload.location_id)
+        if location is None or location.org_id != current_user.org_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid location for this organization.")
 
     # --- Pipeline step 2: AI extraction (category, severity, urgency, safety) ---
-    extraction = ai_extraction.extract(payload.description, payload.landmark)
+    # The reporter's own words about an unlisted location are part of the
+    # report's meaning, so they're handed to the extractor alongside the
+    # landmark rather than being treated as separate metadata.
+    location_hint = " / ".join(h for h in (payload.landmark, payload.custom_location) if h) or None
+    # Both AI provider clients are synchronous. Called directly from this
+    # async handler they block the entire worker's event loop for the whole
+    # round trip (plus up to ~17s of retry backoff on a bad day), freezing
+    # every other institution's requests on the same process. Pushed to a
+    # worker thread so only this request waits.
+    extraction = await anyio.to_thread.run_sync(
+        ai_extraction.extract, payload.description, location_hint
+    )
 
+    # `.first()`, not `.scalar_one_or_none()`: if an org ever ends up with
+    # two categories of the same name, one-or-none raises and takes down
+    # EVERY report submission for that institution. create_category now
+    # rejects duplicates, but this lookup sits on the critical path for
+    # every single report, so it degrades gracefully rather than betting
+    # the whole intake flow on that constraint holding.
     category = (
         await session.execute(
-            select(ProblemCategory).where(
+            select(ProblemCategory)
+            .where(
                 ProblemCategory.org_id == current_user.org_id,
                 ProblemCategory.name.ilike(extraction.category),
             )
+            .order_by(ProblemCategory.created_at)
+            .limit(1)
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
 
     department_id = await routing.resolve_department(
         session,
@@ -104,15 +179,31 @@ async def create_problem(
         landmark=payload.landmark,
         category_id=category.id if category else None,
         location_id=payload.location_id,
+        custom_location=payload.custom_location,
         severity=extraction.severity,
         urgency=extraction.urgency,
         safety_flag=extraction.safety_flag,
+        # Persisted so the UI can show WHY the AI scored it this way, and so
+        # a low-confidence extraction is visibly flagged for a human rather
+        # than quietly treated as fact.
+        ai_reasoning=extraction.reasoning,
+        ai_low_confidence=extraction.low_confidence,
         status=ProblemStatus.reported,
         department_id=department_id,
         # Snapshot the category's typical turnaround now, so it stays
         # stable even if an admin edits the category's estimate later.
         estimated_resolution_hours=category.typical_resolution_hours if category else None,
     )
+    # SECURITY: the client sends back URLs it got from /attachments, but
+    # nothing stops it sending arbitrary ones instead — including a
+    # `javascript:` URL, which the staff report view would render as a
+    # clickable link and execute on our own origin (session theft), or an
+    # attacker-hosted image URL that beacons every staff viewer. So each
+    # URL must be inside our own storage bucket, and the content type must
+    # be one we actually accept. Validated here rather than trusted from
+    # the upload step, because the two calls are independent requests.
+    _validate_attachment_references(payload.attachments)
+
     # Assigning the relationship directly (rather than setting problem_id on
     # each Attachment and session.add()-ing it separately) keeps the
     # collection populated in memory — needed so the response below can
@@ -128,7 +219,11 @@ async def create_problem(
 
     # --- Pipeline steps 3-5: embed the report, search for similar reports,
     # attach to an existing cluster (or start a new one) if it matches ---
-    vector = embeddings.embed(f"{extraction.title}. {payload.description}")
+    # Same reasoning as the extraction call above: the Voyage client is
+    # synchronous, so it runs off the event loop.
+    vector = await anyio.to_thread.run_sync(
+        embeddings.embed, f"{extraction.title}. {payload.description}"
+    )
     cluster = None
     if vector is not None:
         session.add(
@@ -156,6 +251,15 @@ async def create_problem(
 
     # --- Pipeline step 8: SLA due time for this priority bucket ---
     problem.sla_due_at = await sla.compute_sla_due_at(session, org_id=current_user.org_id, bucket=bucket)
+
+    # Joining a cluster changes the "how many people are affected" figure
+    # for everyone already in it, so their scores are stale the moment this
+    # report lands. Re-score them now — otherwise the person who reported
+    # first keeps a "1 person affected" priority and sinks to the bottom of
+    # a queue sorted by priority, which is the opposite of what should
+    # happen as a problem spreads.
+    if cluster is not None:
+        await similarity.resync_cluster_member_priorities(session, cluster=cluster)
 
     session.add(
         StatusHistory(
@@ -224,6 +328,86 @@ async def list_problems(
     return [ProblemResponse.model_validate(r) for r in rows]
 
 
+@router.get("/ai-status", response_model=AiStatusResponse)
+async def get_ai_status(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> AiStatusResponse:
+    """
+    Whether the AI pipeline is actually running right now. The app works
+    either way (see services/ai_extraction.py), but fallback output —
+    everything landing as "Other / severity 50" with no duplicate matching
+    — looks superficially like real analysis, so the UI needs to be able to
+    say plainly which mode it's in. Reports only the on/off state and model
+    names; never the API keys themselves.
+    """
+    settings = get_settings()
+    extraction_on = bool(settings.anthropic_api_key)
+    similarity_on = bool(settings.voyage_api_key)
+    return AiStatusResponse(
+        extraction_enabled=extraction_on,
+        similarity_enabled=similarity_on,
+        extraction_model=settings.anthropic_model if extraction_on else None,
+        embedding_model=settings.voyage_embed_model if similarity_on else None,
+    )
+
+
+@router.get("/clusters", response_model=list[ClusterResponse])
+async def list_clusters(
+    current_user: CurrentUser = Depends(require_role(UserRole.admin, UserRole.owner, UserRole.resolver)),
+    session: AsyncSession = Depends(get_tenant_db),
+) -> list[ClusterResponse]:
+    """
+    The "these many reports are actually one problem" view — the thing that
+    makes the similarity engine's work visible instead of only existing as
+    a cluster_id column nobody ever sees.
+
+    Ordered by report_count so the most-reported underlying problems (the
+    ones quietly generating the most complaints) surface first.
+    """
+    cluster_stmt = (
+        select(ProblemCluster)
+        .where(ProblemCluster.org_id == current_user.org_id)
+        .order_by(ProblemCluster.report_count.desc(), ProblemCluster.last_reported_at.desc())
+    )
+    clusters = (await session.execute(cluster_stmt)).scalars().all()
+    if not clusters:
+        return []
+
+    # One query for every member of every cluster, grouped in Python —
+    # rather than a per-cluster query inside the loop below, which would be
+    # a textbook N+1 as soon as an org has a few dozen clusters.
+    cluster_ids = [c.id for c in clusters]
+    member_stmt = (
+        select(Problem)
+        .where(Problem.org_id == current_user.org_id, Problem.cluster_id.in_(cluster_ids))
+        .order_by(Problem.created_at.desc())
+    )
+    members = (await session.execute(member_stmt)).scalars().all()
+
+    by_cluster: dict[uuid.UUID, list[Problem]] = {cid: [] for cid in cluster_ids}
+    for problem in members:
+        if problem.cluster_id in by_cluster:
+            by_cluster[problem.cluster_id].append(problem)
+
+    return [
+        ClusterResponse(
+            id=c.id,
+            canonical_title=c.canonical_title,
+            status=c.status,
+            report_count=c.report_count,
+            affected_users_estimate=c.affected_users_estimate,
+            recurrence_count=c.recurrence_count,
+            first_reported_at=c.first_reported_at,
+            last_reported_at=c.last_reported_at,
+            category_id=c.category_id,
+            location_id=c.location_id,
+            top_priority_score=max((p.priority_score for p in by_cluster[c.id]), default=0),
+            members=[ClusterMemberResponse.model_validate(p) for p in by_cluster[c.id]],
+        )
+        for c in clusters
+    ]
+
+
 async def _get_owned_or_visible_problem(
     session: AsyncSession, current_user: CurrentUser, problem_id: uuid.UUID
 ) -> Problem:
@@ -253,6 +437,28 @@ async def assign_problem(
     session: AsyncSession = Depends(get_tenant_db),
 ) -> ProblemResponse:
     problem = await _get_owned_or_visible_problem(session, current_user, problem_id)
+
+    # SECURITY: `users` and `user_org_roles` are deliberately outside RLS
+    # (they have to be readable before an org context exists, at login), so
+    # this is one of the few places a client-supplied user id reaches a
+    # query unprotected by the database. Without this check an admin can
+    # assign their org's problem to a user in a DIFFERENT institution —
+    # which also emails that outsider the problem's title. Every other
+    # cross-tenant path is closed; this one has to be closed by hand.
+    membership = (
+        await session.execute(
+            select(UserOrgRole).where(
+                UserOrgRole.user_id == assigned_to_user_id,
+                UserOrgRole.org_id == current_user.org_id,
+                UserOrgRole.role.in_([UserRole.resolver, UserRole.admin, UserRole.owner]),
+            )
+        )
+    ).scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "That person isn't a staff member of this institution.",
+        )
 
     target_state = ProblemStatus.assigned
     try:
@@ -383,6 +589,19 @@ async def change_status(
 ) -> ProblemResponse:
     problem = await _get_owned_or_visible_problem(session, current_user, problem_id)
 
+    # `assigned` is reachable through the state machine, but moving there
+    # via this endpoint would set the status without setting an assignee —
+    # producing a problem that is "assigned" to nobody, which /accept then
+    # refuses to touch (it only accepts reported/verified), stranding it
+    # with no route forward. Assignment has to go through the endpoints
+    # that actually record who owns the work.
+    if payload.to_status == ProblemStatus.assigned:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Use 'Accept this problem' to take it yourself, or assign it to a staff member — "
+            "a problem can't be marked assigned without an owner.",
+        )
+
     try:
         assert_valid_transition(problem.status, payload.to_status)
     except InvalidTransitionError as exc:
@@ -394,6 +613,13 @@ async def change_status(
         problem.resolved_at = datetime.now(timezone.utc)
     if payload.to_status == ProblemStatus.closed:
         problem.closed_at = datetime.now(timezone.utc)
+
+    # Keep the problem's cluster in step: a cluster counts as resolved only
+    # once every report inside it is. This is what later lets a new
+    # matching report be recognised as the SAME problem coming back
+    # (recurrence) rather than as a brand-new issue.
+    await session.flush()  # the status change must be visible to the count below
+    await similarity.sync_cluster_status(session, cluster_id=problem.cluster_id)
 
     # Keep the live-progress line (see /progress) in sync with formal status
     # changes too, so the reporter always sees the freshest note regardless

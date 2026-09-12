@@ -37,11 +37,36 @@ class Problem(Base, UUIDPKMixin, TimestampMixin):
     category_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("problem_categories.id"), nullable=True, index=True
     )
-    location_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("locations.id"), nullable=False, index=True)
+    # Nullable because a reporter may hit "Somewhere else — not in this list"
+    # when the exact spot isn't one of the org's configured locations yet
+    # (e.g. a corridor nobody has added). In that case `custom_location`
+    # below carries their description instead. Exactly one of the two is
+    # always present — enforced in schemas/problem.py's ProblemCreateRequest
+    # and re-checked in api/problems.py before the row is built.
+    location_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("locations.id"), nullable=True, index=True
+    )
+    # Free-text location written by the reporter when no configured location
+    # fits. Staff can later create a real Location for it — this field is
+    # deliberately kept even after that, as the reporter's original words.
+    custom_location: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     severity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0-100, from AI extraction
     urgency: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0-100
     safety_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+
+    # The AI's own one-line justification for the fields above, shown
+    # verbatim in the UI's "AI analysis" panel. Persisted (rather than
+    # discarded after extraction) precisely so a human can audit whether the
+    # model read the report correctly — an AI decision nobody can inspect is
+    # indistinguishable from a hard-coded rule.
+    ai_reasoning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # True when the model told us it was unsure (see the extraction tool
+    # schema). Surfaced to staff as "AI wasn't confident — please double
+    # check" rather than being silently treated as a normal result.
+    ai_low_confidence: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     status: Mapped[ProblemStatus] = mapped_column(nullable=False, default=ProblemStatus.reported, index=True)
 

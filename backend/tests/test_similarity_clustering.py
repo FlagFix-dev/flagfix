@@ -202,3 +202,136 @@ async def test_recurrence_reopens_a_resolved_cluster(org_and_location):
         assert cluster.id == cluster_id
         assert cluster.status == ClusterStatus.open, "a new occurrence must reopen a resolved cluster"
         assert cluster.recurrence_count == 1
+
+
+@pytest.mark.asyncio
+async def test_earlier_cluster_members_are_rescored_as_more_people_report(org_and_location):
+    """
+    The first person to report a widespread problem must not keep a
+    "1 person affected" priority forever.
+
+    Priority is computed at insert time from the cluster's counters as they
+    were at that instant. Without an explicit re-score, the OLDEST report of
+    a problem that 20 people later report keeps its original low score — and
+    since the staff queue sorts by priority, the report that has been waiting
+    longest sinks to the bottom. That is the exact opposite of what should
+    happen, and it quietly undermines the product's core claim.
+    """
+    org_id, user_id, location_id = org_and_location
+    base_vector = _random_unit_vector(seed=7)
+
+    async with AsyncSessionLocal() as session:
+        await set_tenant(session, str(org_id))
+        first = await _create_problem_with_embedding(
+            session, org_id=org_id, user_id=user_id, location_id=location_id,
+            title="Wifi not working in Block A", vector=base_vector,
+        )
+        # Score it the way the intake pipeline would: alone, nobody else affected.
+        from app.services import priority as priority_service
+
+        score, _bucket, reasons = priority_service.compute_priority(
+            severity=50, urgency=50, safety_flag=False,
+            affected_users_estimate=1, recurrence_count=0,
+        )
+        first.priority_score = score
+        first.priority_reasons = reasons
+        await session.commit()
+        first_id, score_when_alone = first.id, first.priority_score
+
+    async with AsyncSessionLocal() as session:
+        await set_tenant(session, str(org_id))
+        second = await _create_problem_with_embedding(
+            session, org_id=org_id, user_id=user_id, location_id=location_id,
+            title="Internet is gone on the 2nd floor", vector=_close_vector(base_vector, noise=0.02),
+        )
+        matches = [
+            m
+            for m in await similarity.find_similar(
+                session, org_id=org_id, new_embedding=_close_vector(base_vector, noise=0.02)
+            )
+            if m.problem.id != second.id
+        ]
+        cluster = await similarity.attach_to_cluster_or_create(
+            session, org_id=org_id, problem=second, matches=matches
+        )
+        assert cluster is not None
+        await similarity.resync_cluster_member_priorities(session, cluster=cluster)
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        await set_tenant(session, str(org_id))
+        refreshed = await session.get(Problem, first_id)
+        assert refreshed.priority_score > score_when_alone, (
+            "the first reporter's priority should rise once the problem is confirmed "
+            f"by others (was {score_when_alone}, still {refreshed.priority_score})"
+        )
+
+
+@pytest.mark.asyncio
+async def test_cluster_is_marked_resolved_only_when_every_report_is(org_and_location):
+    """
+    Recurrence detection depends entirely on a cluster reaching `resolved`:
+    the "this problem came back" branch only fires against a resolved
+    cluster. Nothing in the app used to set that status, so recurrence_count
+    was structurally always 0 and the owner-facing "times it came back"
+    figure was permanently meaningless.
+    """
+    org_id, user_id, location_id = org_and_location
+    base_vector = _random_unit_vector(seed=11)
+
+    async with AsyncSessionLocal() as session:
+        await set_tenant(session, str(org_id))
+        p1 = await _create_problem_with_embedding(
+            session, org_id=org_id, user_id=user_id, location_id=location_id,
+            title="Tap leaking in the washroom", vector=base_vector,
+        )
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        await set_tenant(session, str(org_id))
+        near = _close_vector(base_vector, noise=0.02)
+        p2 = await _create_problem_with_embedding(
+            session, org_id=org_id, user_id=user_id, location_id=location_id,
+            title="Washroom tap keeps dripping", vector=near,
+        )
+        matches = [
+            m
+            for m in await similarity.find_similar(session, org_id=org_id, new_embedding=near)
+            if m.problem.id != p2.id
+        ]
+        cluster = await similarity.attach_to_cluster_or_create(
+            session, org_id=org_id, problem=p2, matches=matches
+        )
+        assert cluster is not None
+        await session.commit()
+        cluster_id, p1_id, p2_id = cluster.id, p1.id, p2.id
+
+    # Resolving ONE of the two reports must NOT resolve the cluster.
+    async with AsyncSessionLocal() as session:
+        await set_tenant(session, str(org_id))
+        (await session.get(Problem, p1_id)).status = ProblemStatus.resolved
+        await session.flush()
+        await similarity.sync_cluster_status(session, cluster_id=cluster_id)
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        await set_tenant(session, str(org_id))
+        from app.models.problem import ProblemCluster
+
+        assert (await session.get(ProblemCluster, cluster_id)).status == ClusterStatus.open, (
+            "a cluster with one report still open must stay open"
+        )
+
+    # Resolving the last one closes the cluster.
+    async with AsyncSessionLocal() as session:
+        await set_tenant(session, str(org_id))
+        (await session.get(Problem, p2_id)).status = ProblemStatus.resolved
+        await session.flush()
+        await similarity.sync_cluster_status(session, cluster_id=cluster_id)
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        await set_tenant(session, str(org_id))
+        from app.models.problem import ProblemCluster
+
+        assert (await session.get(ProblemCluster, cluster_id)).status == ClusterStatus.resolved

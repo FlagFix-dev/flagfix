@@ -19,6 +19,12 @@ import type { LocationResponse, ProblemResponse } from "@/lib/types";
 const MAX_FILES = 5;
 const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/webm,video/quicktime";
 
+// Sentinel value for the location <select>. Not a real location id — when
+// this is chosen we send `custom_location` instead of `location_id`, which
+// is exactly what the backend's ProblemCreateRequest expects.
+const OTHER_LOCATION = "__other__";
+const MIN_CUSTOM_LOCATION = 12; // mirrors the backend validator
+
 interface PendingFile {
   file: File;
   previewUrl: string | null; // object URL for images; null for video (shown as a name chip instead)
@@ -28,13 +34,19 @@ interface PendingFile {
 export default function NewReportPage() {
   const router = useRouter();
   const [locations, setLocations] = useState<LocationResponse[] | null>(null);
+  // "" while loading, a real location id, or OTHER_LOCATION when the
+  // reporter says none of the configured places fit.
   const [locationId, setLocationId] = useState("");
+  const [customLocation, setCustomLocation] = useState("");
   const [description, setDescription] = useState("");
   const [landmark, setLandmark] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [error, setError] = useState<string | null>(null);
+  // Survives the switch to the success screen, unlike `error` — see the
+  // upload catch block in handleSubmit.
+  const [attachmentWarning, setAttachmentWarning] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [uploadStage, setUploadStage] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<ProblemResponse | null>(null);
@@ -44,18 +56,37 @@ export default function NewReportPage() {
       .listLocations()
       .then((locs) => {
         setLocations(locs);
-        if (locs.length > 0) setLocationId(locs[0].id);
+        // Default to the first configured location, or straight to the
+        // free-text branch if the org hasn't set any up yet — a reporter
+        // should never be blocked from reporting by an admin's incomplete
+        // setup.
+        setLocationId(locs.length > 0 ? locs[0].id : OTHER_LOCATION);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load locations."));
+      .catch((err) => {
+        setError(err instanceof ApiError ? err.message : "Could not load locations.");
+        // Fall back to an empty list rather than leaving it null: with
+        // `locations === null` the submit button stays disabled forever,
+        // so one transient network blip would block reporting entirely —
+        // even though a report with a written-in location needs no list
+        // at all.
+        setLocations([]);
+        setLocationId(OTHER_LOCATION);
+      });
   }, []);
 
-  // Object URLs must be released or they leak memory for the life of the
-  // page — clean up whenever the list changes or the component unmounts.
+  // Object URLs must be released or the blobs stay in memory for the life
+  // of the page. The unmount cleanup has to read the CURRENT file list, so
+  // it reads from a ref: a cleanup with an empty dependency array closes
+  // over the first render's (empty) array and would free nothing at all.
+  const pendingFilesRef = useRef<PendingFile[]>([]);
+  useEffect(() => {
+    pendingFilesRef.current = pendingFiles;
+  }, [pendingFiles]);
+
   useEffect(() => {
     return () => {
-      pendingFiles.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
+      pendingFilesRef.current.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleFilesChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -106,21 +137,26 @@ export default function NewReportPage() {
           const uploaded = await problemsApi.uploadAttachments(pendingFiles.map((p) => p.file));
           attachments = uploaded.map((a) => ({ url: a.url, content_type: a.content_type }));
         } catch (uploadErr) {
-          // Media upload failing shouldn't block the report itself — tell
-          // the reporter clearly, then keep going without attachments
-          // rather than losing their whole report.
-          setError(
+          // Media upload failing shouldn't block the report itself — but
+          // the reporter must still be told, and `error` alone won't do
+          // it: submission continues and the success screen replaces this
+          // form a moment later, taking the message with it. So the
+          // warning is held separately and shown ON the success screen.
+          setAttachmentWarning(
             uploadErr instanceof ApiError
-              ? `Couldn't attach your files (${uploadErr.message}). Submitting the report without them.`
-              : "Couldn't attach your files. Submitting the report without them."
+              ? `Your report was sent, but the photos/videos couldn't be attached (${uploadErr.message}).`
+              : "Your report was sent, but the photos/videos couldn't be attached."
           );
         }
         setUploadStage(null);
       }
 
+      const usingCustom = locationId === OTHER_LOCATION;
       const problem = await problemsApi.create({
         description,
-        location_id: locationId,
+        // Exactly one of these — never both, never neither.
+        location_id: usingCustom ? null : locationId,
+        custom_location: usingCustom ? customLocation.trim() : null,
         landmark: landmark || null,
         attachments,
       });
@@ -137,6 +173,8 @@ export default function NewReportPage() {
     setSubmitted(null);
     setDescription("");
     setLandmark("");
+    setCustomLocation("");
+    setAttachmentWarning(null);
     pendingFiles.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
     setPendingFiles([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -156,6 +194,13 @@ export default function NewReportPage() {
               <h2 className="text-lg font-semibold text-ink-900">Report received</h2>
               <p className="mt-1 text-sm text-ink-600">"{submitted.title}"</p>
             </div>
+
+            {attachmentWarning && (
+              <Alert tone="error">
+                {attachmentWarning} You can add them by replying to this report, or tell staff
+                directly.
+              </Alert>
+            )}
             <div className="flex items-center justify-center gap-2">
               <PriorityBadge score={submitted.priority_score} />
             </div>
@@ -280,14 +325,49 @@ export default function NewReportPage() {
                 onChange={(e) => setLocationId(e.target.value)}
                 className="bg-white"
               >
-                {locations === null && <option>Loading…</option>}
-                {locations?.length === 0 && <option value="">No locations set up yet</option>}
+                {locations === null && <option value="">Loading…</option>}
                 {locations?.map((loc) => (
                   <option key={loc.id} value={loc.id}>
                     {loc.path} ({LOCATION_TYPE_LABELS[loc.type]})
                   </option>
                 ))}
+                {/* Always offered, even when the org has locations — the
+                    reporter may be standing somewhere nobody has added
+                    yet, and forcing a wrong pick loses that information. */}
+                {locations !== null && (
+                  <option value={OTHER_LOCATION}>Somewhere else — not in this list</option>
+                )}
               </Select>
+
+              {locationId === OTHER_LOCATION && (
+                <div className="mt-3 animate-fade-up rounded-xl border-2 border-amber-200 bg-amber-50/70 p-3">
+                  <Label htmlFor="customLocation" className="text-ink-900">
+                    Describe exactly where it is <span className="text-red-500">*</span>
+                  </Label>
+                  <Textarea
+                    id="customLocation"
+                    required
+                    rows={2}
+                    minLength={MIN_CUSTOM_LOCATION}
+                    maxLength={300}
+                    placeholder="e.g. Staircase between 2nd and 3rd floor of the Science Block, near the fire extinguisher"
+                    value={customLocation}
+                    onChange={(e) => setCustomLocation(e.target.value)}
+                    className="bg-white"
+                  />
+                  <p className="mt-1 text-xs text-ink-600">
+                    Name the building, the floor, and something nearby that doesn't move — a door
+                    number, a noticeboard, a staircase. <strong>Please also attach a photo above</strong>
+                    , it's the fastest way for staff to find the exact spot.
+                  </p>
+                  {customLocation.trim().length > 0 &&
+                    customLocation.trim().length < MIN_CUSTOM_LOCATION && (
+                      <p className="mt-1 text-xs font-medium text-amber-700">
+                        A bit more detail, please — staff have to find this from your words alone.
+                      </p>
+                    )}
+                </div>
+              )}
 
               <div className="mt-3">
                 <Label htmlFor="landmark" className="text-ink-900">
@@ -315,7 +395,12 @@ export default function NewReportPage() {
               size="lg"
               className="w-full"
               loading={submitting}
-              disabled={locations?.length === 0}
+              disabled={
+                locations === null ||
+                locationId === "" ||
+                (locationId === OTHER_LOCATION &&
+                  customLocation.trim().length < MIN_CUSTOM_LOCATION)
+              }
             >
               {uploadStage ?? "Submit report"}
             </Button>

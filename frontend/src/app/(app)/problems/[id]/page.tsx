@@ -23,6 +23,21 @@ const REFRESH_INTERVAL_MS = 20_000;
 
 const QUICK_PROGRESS_NOTES = ["Work started", "Technician on the way", "Almost done", "Waiting on parts"];
 
+/** A 0-100 value the AI extracted, drawn as a bar so staff can see at a
+ * glance how strong the signal was rather than parsing a bare number. */
+function MeterTile({ label, value }: { label: string; value: number }) {
+  const tone = value >= 75 ? "bg-red-500" : value >= 50 ? "bg-amber-500" : "bg-green-500";
+  return (
+    <div className="rounded-xl bg-ink-50 p-3">
+      <p className="text-xs text-ink-500">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-ink-900">{value}/100</p>
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-ink-200">
+        <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+      </div>
+    </div>
+  );
+}
+
 export default function ProblemDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -134,7 +149,11 @@ export default function ProblemDetailPage() {
   const location = locations.find((l) => l.id === problem.location_id);
   const due = relativeDue(problem.sla_due_at);
   const reasons = (problem.priority_reasons?.reasons as string[] | undefined) ?? [];
-  const nextSteps = ALLOWED_TRANSITIONS[problem.status];
+  // `assigned` is deliberately excluded from the status buttons: taking
+  // ownership happens through "Accept this problem" (which records WHO
+  // accepted it). Offering it here would let staff mark a problem assigned
+  // to nobody, which the server now rejects anyway.
+  const nextSteps = ALLOWED_TRANSITIONS[problem.status].filter((s) => s !== "assigned");
   const canGiveFeedback = !isStaff && problem.status === "resolved" && !feedbackSubmitted;
   const canAccept = isStaff && !problem.assigned_to_user_id && (problem.status === "reported" || problem.status === "verified");
   const canPostProgress = isStaff && problem.status !== "resolved" && problem.status !== "closed";
@@ -169,23 +188,43 @@ export default function ProblemDetailPage() {
 
           {problem.attachments.length > 0 && (
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {problem.attachments.map((a) =>
-                a.content_type.startsWith("video/") ? (
-                  <video key={a.id} src={a.url} controls className="aspect-square rounded-xl border border-ink-100 object-cover" />
+              {problem.attachments.map((a) => {
+                // Defence in depth. The server already refuses any URL
+                // outside our storage bucket, but this view renders
+                // user-submitted values as a live href/src — so anything
+                // that isn't plain https is dropped here too rather than
+                // trusted. A `javascript:` href would otherwise execute on
+                // our own origin when a staff member clicks it.
+                const src = /^https:\/\//i.test(a.url) ? a.url : "";
+                if (!src) return null;
+                return a.content_type.startsWith("video/") ? (
+                  <video
+                    key={a.id}
+                    src={src}
+                    controls
+                    className="aspect-square rounded-xl border border-ink-100 object-cover"
+                  />
                 ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <a key={a.id} href={a.url} target="_blank" rel="noreferrer">
-                    <img src={a.url} alt="" className="aspect-square rounded-xl border border-ink-100 object-cover" />
+                  <a key={a.id} href={src} target="_blank" rel="noreferrer noopener">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={src} alt="" className="aspect-square rounded-xl border border-ink-100 object-cover" />
                   </a>
-                )
-              )}
+                );
+              })}
             </div>
           )}
 
           <dl className="grid grid-cols-2 gap-4 border-t border-ink-100 pt-4 text-sm">
             <div>
               <dt className="text-ink-500">Location</dt>
-              <dd className="mt-0.5 text-ink-900">{location?.path ?? "—"}</dd>
+              <dd className="mt-0.5 text-ink-900">
+                {location?.path ?? problem.custom_location ?? "—"}
+                {problem.custom_location && (
+                  <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    described by reporter
+                  </span>
+                )}
+              </dd>
             </div>
             {problem.landmark && (
               <div>
@@ -225,6 +264,63 @@ export default function ProblemDetailPage() {
           )}
         </CardBody>
       </Card>
+
+      {/* The AI's own working, shown rather than hidden. Staff only: a
+          reporter doesn't need to see triage internals, but the people
+          acting on the score absolutely do — a score nobody can question
+          is a score nobody should trust. */}
+      {isStaff && (
+        <Card elevated>
+          <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>AI analysis</CardTitle>
+            {problem.ai_low_confidence ? (
+              <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                Low confidence — please verify
+              </span>
+            ) : (
+              <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
+                Confident
+              </span>
+            )}
+          </CardHeader>
+          <CardBody className="space-y-4">
+            {problem.ai_reasoning && (
+              <div className="rounded-xl border-l-4 border-l-accent-400 bg-accent-50/60 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-accent-700">
+                  What the AI read from this report
+                </p>
+                <p className="mt-1 text-sm italic text-ink-800">"{problem.ai_reasoning}"</p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <MeterTile label="Severity" value={problem.severity} />
+              <MeterTile label="Urgency" value={problem.urgency} />
+              <div className="rounded-xl bg-ink-50 p-3">
+                <p className="text-xs text-ink-500">Safety risk</p>
+                <p
+                  className={`mt-1 text-sm font-semibold ${
+                    problem.safety_flag ? "text-red-600" : "text-ink-700"
+                  }`}
+                >
+                  {problem.safety_flag ? "⚠ Flagged" : "None detected"}
+                </p>
+              </div>
+              <div className="rounded-xl bg-ink-50 p-3">
+                <p className="text-xs text-ink-500">Priority score</p>
+                <p className="mt-1 text-sm font-semibold text-ink-900">{problem.priority_score}/100</p>
+              </div>
+            </div>
+
+            <p className="text-xs leading-relaxed text-ink-500">
+              Severity, urgency and safety are read from the reporter's free text by the language
+              model. The priority score itself is then calculated by a fixed, auditable formula from
+              those values plus how many people are affected and whether the problem has recurred —
+              so the same inputs always produce the same score.
+            </p>
+          </CardBody>
+        </Card>
+      )}
 
       {problem.latest_update && (
         <Card elevated className="border-l-4 border-l-brand-500">

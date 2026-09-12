@@ -78,8 +78,16 @@ export default function HomePage() {
   }, [initializing, claims, router]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-brand-50 via-white to-white">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-brand-50 via-white to-white">
+      {/* Ambient depth behind the hero — soft, slow-drifting colour that
+          gives the page a sense of space without competing with text. */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-[720px] overflow-hidden">
+        <div className="orb animate-float-slow -left-32 -top-32 h-[26rem] w-[26rem] bg-brand-300" />
+        <div className="orb animate-float-slower right-[-8rem] top-10 h-[30rem] w-[30rem] bg-accent-400" />
+        <div className="orb left-1/2 top-64 h-72 w-72 -translate-x-1/2 bg-brand-200 opacity-40" />
+      </div>
+
+      <header className="relative mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient text-sm font-bold text-white shadow-raised">
             F
@@ -96,8 +104,8 @@ export default function HomePage() {
         </nav>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 pb-24 pt-10 sm:pt-20">
-        <div className="mx-auto max-w-3xl text-center">
+      <main className="relative mx-auto max-w-6xl px-6 pb-24 pt-10 sm:pt-20">
+        <div className="mx-auto max-w-3xl animate-fade-up text-center">
           <span className="inline-flex items-center rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700">
             For colleges, universities, hostels &amp; PGs
           </span>
@@ -123,14 +131,86 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="mt-20 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {FEATURES.map((f) => (
-            <div key={f.title} className="rounded-2xl border border-ink-100 bg-white p-5 shadow-card transition-shadow hover:shadow-card-hover">
+        <div className="tilt-parent mt-20 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {FEATURES.map((f, i) => (
+            <div
+              key={f.title}
+              style={{ animationDelay: `${i * 70}ms` }}
+              className="tilt-card animate-fade-up rounded-2xl border border-ink-100 bg-white p-5 shadow-card"
+            >
               <h3 className="text-sm font-semibold text-ink-900">{f.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-ink-600">{f.body}</p>
             </div>
           ))}
         </div>
+
+        {/* --- The concrete "here is what the AI actually does" demo. Shows
+            five differently-worded reports collapsing into one problem,
+            which is the single clearest way to explain the product. --- */}
+        <section className="mt-28">
+          <div className="mx-auto max-w-2xl text-center">
+            <h2 className="text-3xl font-bold tracking-tight text-ink-900">
+              Ten complaints are often one problem
+            </h2>
+            <p className="mt-3 text-ink-600">
+              These five reports share almost no words. FlagFix reads what they mean, not which words
+              they used — and files them as a single job for your team.
+            </p>
+          </div>
+
+          <div className="mt-10 grid items-center gap-6 lg:grid-cols-[1fr_auto_1fr]">
+            <div className="space-y-2.5">
+              {[
+                "wifi not working in block a",
+                "Internet gone on 2nd floor",
+                "cannot connect to campus wifi :(",
+                "network is extremely slow today",
+                "no wifi near room 214",
+              ].map((t, i) => (
+                <div
+                  key={t}
+                  style={{ animationDelay: `${i * 80}ms` }}
+                  className="animate-fade-up rounded-xl border border-ink-100 bg-white px-4 py-2.5 text-sm text-ink-700 shadow-card"
+                >
+                  "{t}"
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-center text-3xl text-brand-400 lg:flex-col">
+              <span className="hidden lg:block">↓</span>
+              <span className="lg:hidden">↓</span>
+            </div>
+
+            <Card elevated className="glass-dark animate-fade-up text-white">
+              <CardBody className="space-y-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-white/70">
+                  One underlying problem
+                </p>
+                <p className="text-xl font-bold">Block A network failure</p>
+                <div className="grid grid-cols-3 gap-3 pt-1">
+                  <div>
+                    <p className="text-2xl font-bold">5</p>
+                    <p className="text-xs text-white/70">reports</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">42</p>
+                    <p className="text-xs text-white/70">affected</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">3</p>
+                    <p className="text-xs text-white/70">days recurring</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs">IT department</span>
+                  <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs">High priority</span>
+                  <span className="rounded-full bg-red-400/30 px-2.5 py-0.5 text-xs">SLA at risk</span>
+                </div>
+              </CardBody>
+            </Card>
+          </div>
+        </section>
 
         {/* --- How FlagFix's AI thinks --- */}
         <section className="mt-28">
@@ -145,9 +225,9 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="tilt-parent mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {AI_STEPS.map((s) => (
-              <Card key={s.step} elevated className="bg-white">
+              <Card key={s.step} elevated tilt className="bg-white">
                 <CardBody>
                   <span className="text-xs font-bold text-accent-500">{s.step}</span>
                   <h3 className="mt-1 text-base font-semibold text-ink-900">{s.title}</h3>

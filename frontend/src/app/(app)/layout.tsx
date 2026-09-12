@@ -19,9 +19,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (initializing || !claims) return <FullPageSpinner />;
 
   return (
-    <div className="min-h-screen bg-ink-50">
-      <Navbar />
-      <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+    <div className="relative min-h-screen bg-ink-50">
+      {/* Ambient colour wash behind the whole app. Fixed and non-
+          interactive, it gives the glass surfaces (navbar, cards)
+          something to actually refract, which is what stops "frosted
+          glass" from just looking like grey. */}
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="orb animate-float-slow -left-24 -top-24 h-80 w-80 bg-brand-300" />
+        <div className="orb animate-float-slower right-[-6rem] top-32 h-96 w-96 bg-accent-400" />
+        <div className="orb left-1/3 top-[60%] h-72 w-72 bg-brand-200 opacity-40" />
+      </div>
+
+      <div className="relative">
+        <Navbar />
+        <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+      </div>
     </div>
   );
 }

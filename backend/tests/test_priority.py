@@ -34,6 +34,54 @@ def test_exposed_wire_style_report_is_critical():
     assert score >= 85
 
 
+def test_first_report_of_a_severe_safety_hazard_is_critical_immediately():
+    """The single most important property of this scorer.
+
+    A live exposed wire reported by ONE person must be Critical straight
+    away. Under a pure weighted average it scored 72 (High) and only
+    reached Critical once ~10 people had reported it — which is backwards:
+    the first report of a physical hazard is the one that most needs a
+    fast response, not the tenth.
+    """
+    score, bucket, reasons = compute_priority(
+        severity=90, urgency=90, safety_flag=True, affected_users_estimate=1, recurrence_count=0
+    )
+    assert bucket == PriorityBucket.critical
+    assert score >= 85
+    assert any("Critical automatically" in r for r in reasons["reasons"])
+
+
+def test_any_safety_risk_is_at_least_high_even_when_mild():
+    """A safety flag on an otherwise unremarkable report still can't be
+    triaged as Low/Medium and left for three days."""
+    score, bucket, reasons = compute_priority(
+        severity=30, urgency=30, safety_flag=True, affected_users_estimate=1, recurrence_count=0
+    )
+    assert bucket == PriorityBucket.high
+    assert score >= 65
+    assert any("High automatically" in r for r in reasons["reasons"])
+
+
+def test_safety_floor_never_lowers_an_already_higher_score():
+    """The floor only ever raises. A widely-reported, recurring hazard
+    must keep its earned score rather than being pulled down to 85."""
+    score, bucket, _ = compute_priority(
+        severity=100, urgency=100, safety_flag=True, affected_users_estimate=50, recurrence_count=5
+    )
+    assert bucket == PriorityBucket.critical
+    assert score >= 85
+
+
+def test_no_safety_flag_means_no_floor():
+    """A non-safety report is still governed purely by the weighted
+    formula — the floor must not leak into ordinary reports."""
+    score, bucket, _ = compute_priority(
+        severity=30, urgency=30, safety_flag=False, affected_users_estimate=1, recurrence_count=0
+    )
+    assert bucket == PriorityBucket.low
+    assert score < 40
+
+
 def test_recurrence_raises_priority_even_with_modest_severity():
     fresh, fresh_bucket, _ = compute_priority(
         severity=40, urgency=40, safety_flag=False, affected_users_estimate=1, recurrence_count=0

@@ -11,7 +11,7 @@ import { Alert } from "@/components/ui/alert";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ApiError, orgsApi } from "@/lib/api";
-import { ADMIN_ROLES, LOCATION_TYPE_LABELS, STAFF_ROLES } from "@/lib/constants";
+import { ADMIN_ROLES, LOCATION_TYPE_LABELS } from "@/lib/constants";
 import type { LocationResponse, LocationType, OrgProfileResponse } from "@/lib/types";
 
 export default function LocationsPage() {
@@ -31,13 +31,15 @@ export default function LocationsPage() {
   const [regenerating, setRegenerating] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
 
-  const isStaff = claims ? STAFF_ROLES.includes(claims.role) : false;
+  // Gated on ADMIN, not STAFF: creating a location requires admin/owner
+  // server-side, so showing this page to a plain staff member (resolver)
+  // would present a form that always fails with a bare 403.
   const isAdmin = claims ? ADMIN_ROLES.includes(claims.role) : false;
   const isOwner = claims?.role === "owner";
 
   useEffect(() => {
-    if (claims && !isStaff) router.replace("/dashboard");
-  }, [claims, isStaff, router]);
+    if (claims && !isAdmin) router.replace("/dashboard");
+  }, [claims, isAdmin, router]);
 
   useEffect(() => {
     orgsApi
@@ -91,7 +93,7 @@ export default function LocationsPage() {
     }
   }
 
-  if (!isStaff) return <FullPageSpinner />;
+  if (!isAdmin) return <FullPageSpinner />;
 
   return (
     <div className="space-y-6">

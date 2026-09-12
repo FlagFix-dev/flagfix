@@ -1,7 +1,9 @@
 import { clearSession, getSession, updateTokens } from "./session";
 import type {
+  AiStatusResponse,
   AttachmentResponse,
   CategoryResponse,
+  ClusterResponse,
   DepartmentResponse,
   FeedbackRequest,
   LocationCreateRequest,
@@ -116,6 +118,13 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
         headers: retryHeaders,
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
+      if (retryRes.status === 401) {
+        // The refresh appeared to succeed but the new token is still
+        // rejected — the session is genuinely dead. Clear it, or every
+        // later request loops through a pointless refresh forever.
+        clearSession();
+        throw new ApiError("Your session has expired. Please log in again.", 401);
+      }
       if (!retryRes.ok) throw new ApiError(await extractErrorMessage(retryRes), retryRes.status);
       if (retryRes.status === 204) return undefined as T;
       return (await retryRes.json()) as T;
@@ -211,6 +220,12 @@ export const problemsApi = {
   uploadAttachments,
 
   listMine: () => request<ProblemResponse[]>("/api/problems/mine"),
+
+  /** The "these N reports are actually one problem" view (staff only). */
+  listClusters: () => request<ClusterResponse[]>("/api/problems/clusters"),
+
+  /** Whether the AI pipeline is live or running on the rule-based fallback. */
+  aiStatus: () => request<AiStatusResponse>("/api/problems/ai-status"),
 
   list: (filters: { status?: ProblemStatus; category_id?: string; location_id?: string } = {}) =>
     request<ProblemResponse[]>("/api/problems", { query: filters }),
