@@ -38,17 +38,27 @@ class Settings(BaseSettings):
     voyage_api_key: str | None = None
     voyage_embed_model: str = "voyage-3.5-lite"
 
-    # --- Object storage ---
-    r2_account_id: str | None = None
-    r2_access_key_id: str | None = None
-    r2_secret_access_key: str | None = None
-    r2_bucket_name: str = "flagfix-attachments"
-    # The bucket's public base URL — either the "r2.dev" development subdomain
-    # Cloudflare gives you when you enable public access on the bucket, or a
-    # custom domain you've connected to it. Attachment URLs are built as
-    # f"{r2_public_base_url}/{object_key}", so this must be set for uploaded
-    # photos/videos to actually be viewable.
-    r2_public_base_url: str | None = None
+    # --- Object storage (any S3-compatible provider) ---
+    # Deliberately provider-agnostic rather than hard-coded to one vendor:
+    # Supabase Storage, Cloudflare R2, Backblaze B2 and AWS S3 all speak the
+    # same S3 protocol, so switching provider later is an environment-variable
+    # change with no code change. The endpoint is given in full for exactly
+    # that reason (vendors each shape their hostnames differently).
+    #
+    # Supabase Storage (what FlagFix uses today):
+    #   STORAGE_ENDPOINT_URL = https://<project-ref>.storage.supabase.co/storage/v1/s3
+    #   STORAGE_REGION       = the project's region, e.g. ap-south-1
+    #   STORAGE_PUBLIC_BASE_URL =
+    #       https://<project-ref>.supabase.co/storage/v1/object/public/<bucket>
+    storage_endpoint_url: str | None = None
+    storage_region: str = "auto"
+    storage_access_key_id: str | None = None
+    storage_secret_access_key: str | None = None
+    storage_bucket_name: str = "flagfix-attachments"
+    # The bucket's public base URL. Attachment URLs are built as
+    # f"{storage_public_base_url}/{object_key}", so this must be set for
+    # uploaded photos/videos to actually be viewable.
+    storage_public_base_url: str | None = None
 
     # --- Email ---
     resend_api_key: str | None = None
@@ -75,13 +85,13 @@ class Settings(BaseSettings):
     @property
     def storage_configured(self) -> bool:
         """Same graceful-degradation philosophy as the AI pipeline: photo/
-        video upload only turns on once all four R2 settings are present.
+        video upload only turns on once every storage setting is present.
         Until then, reports can still be submitted — just without media."""
         return bool(
-            self.r2_account_id
-            and self.r2_access_key_id
-            and self.r2_secret_access_key
-            and self.r2_public_base_url
+            self.storage_endpoint_url
+            and self.storage_access_key_id
+            and self.storage_secret_access_key
+            and self.storage_public_base_url
         )
 
 

@@ -1,15 +1,18 @@
 """
-Photo/video upload for reports, backed by Cloudflare R2 (S3-compatible
-object storage). Same graceful-degradation philosophy as the AI pipeline
-(see services/ai_extraction.py): if R2 isn't configured yet, uploads are
+Photo/video upload for reports, backed by any S3-compatible object store —
+Supabase Storage today, but Cloudflare R2, Backblaze B2 or AWS S3 would each
+work by changing environment variables alone (see config.py). Same
+graceful-degradation philosophy as the AI pipeline (see
+services/ai_extraction.py): if storage isn't configured yet, uploads are
 simply unavailable — a report can still be submitted without media — rather
 than the app crashing because a bucket doesn't exist.
 
 Uploads go through OUR backend (not a browser-side pre-signed URL) on
-purpose: it means the R2 bucket itself never needs CORS configured for the
-frontend's origin, which is one less thing to get wrong during setup. The
-tradeoff is that a file's bytes pass through the Render instance's memory
-before landing in R2 — acceptable at MVP scale given the size caps below.
+purpose: it means the bucket itself never needs CORS configured for the
+frontend's origin, which is one less thing to get wrong during setup, and
+the storage credentials never touch the browser. The tradeoff is that a
+file's bytes pass through the Render instance's memory before landing in
+the bucket — acceptable at MVP scale given the size caps below.
 """
 import logging
 import uuid
@@ -22,7 +25,8 @@ logger = logging.getLogger("flagfix.storage")
 
 # Deliberately conservative for an MVP running on a free-tier backend
 # instance: big enough for a phone photo or a short clip, small enough that
-# a handful of concurrent uploads won't exhaust available memory.
+# a handful of concurrent uploads won't exhaust available memory. Both caps
+# also sit safely under Supabase Storage's 50MB-per-file free-plan ceiling.
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_VIDEO_BYTES = 40 * 1024 * 1024  # 40 MB
 MAX_FILES_PER_REPORT = 5
@@ -58,10 +62,10 @@ def _client():
     settings = get_settings()
     return boto3.client(
         "s3",
-        endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
-        aws_access_key_id=settings.r2_access_key_id,
-        aws_secret_access_key=settings.r2_secret_access_key,
-        region_name="auto",
+        endpoint_url=settings.storage_endpoint_url,
+        aws_access_key_id=settings.storage_access_key_id,
+        aws_secret_access_key=settings.storage_secret_access_key,
+        region_name=settings.storage_region,
     )
 
 
@@ -92,14 +96,14 @@ async def save_upload(org_id: uuid.UUID, file: UploadFile) -> tuple[str, str]:
 
     try:
         _client().put_object(
-            Bucket=settings.r2_bucket_name,
+            Bucket=settings.storage_bucket_name,
             Key=key,
             Body=data,
             ContentType=content_type,
         )
     except Exception:  # noqa: BLE001 — a storage-provider outage must not 500 the request
-        logger.exception("R2 upload failed for key %s", key)
+        logger.exception("Object storage upload failed for key %s", key)
         raise UploadRejected("Could not upload that file right now. Please try again in a moment.")
 
-    url = f"{settings.r2_public_base_url.rstrip('/')}/{key}"
+    url = f"{settings.storage_public_base_url.rstrip('/')}/{key}"
     return url, content_type
