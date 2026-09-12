@@ -26,6 +26,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<SelfSignupRole>("reporter");
+  const [staffCode, setStaffCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -34,7 +35,14 @@ export default function SignupPage() {
     setError(null);
     setLoading(true);
     try {
-      await signup({ org_slug: orgSlug, name, email, password, role });
+      await signup({
+        org_slug: orgSlug,
+        name,
+        email,
+        password,
+        role,
+        staff_code: role === "resolver" ? staffCode : null,
+      });
       router.push("/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
@@ -118,6 +126,23 @@ export default function SignupPage() {
               ))}
             </div>
           </div>
+
+          {role === "resolver" && (
+            <div>
+              <Label htmlFor="staffCode">Institute staff code</Label>
+              <Input
+                id="staffCode"
+                required
+                placeholder="e.g. A1B2C3D4"
+                value={staffCode}
+                onChange={(e) => setStaffCode(e.target.value)}
+              />
+              <p className="mt-1 text-xs text-ink-500">
+                Ask your admin or owner for this — it's on their org settings page. Students don't
+                need one.
+              </p>
+            </div>
+          )}
 
           <Button type="submit" size="lg" className="w-full" loading={loading}>
             Create account

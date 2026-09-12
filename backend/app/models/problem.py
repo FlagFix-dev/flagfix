@@ -59,6 +59,20 @@ class Problem(Base, UUIDPKMixin, TimestampMixin):
     sla_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     sla_breached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
 
+    # Snapshot of the category's typical_resolution_hours at the moment this
+    # report was filed (see services/ai_extraction.py + api/problems.py) —
+    # stored on the problem itself, not just looked up via category, so it
+    # stays stable even if an admin later edits the category's estimate.
+    estimated_resolution_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # A short, free-text "what's happening right now" note staff can post
+    # without necessarily changing the formal status — e.g. "Technician
+    # called, arriving in 30 minutes" while status stays `in_progress`.
+    # Reporters and admins both see this on the problem detail page as a
+    # live-ish progress indicator (see POST /{id}/progress).
+    latest_update: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    latest_update_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

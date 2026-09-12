@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     r2_access_key_id: str | None = None
     r2_secret_access_key: str | None = None
     r2_bucket_name: str = "flagfix-attachments"
+    # The bucket's public base URL — either the "r2.dev" development subdomain
+    # Cloudflare gives you when you enable public access on the bucket, or a
+    # custom domain you've connected to it. Attachment URLs are built as
+    # f"{r2_public_base_url}/{object_key}", so this must be set for uploaded
+    # photos/videos to actually be viewable.
+    r2_public_base_url: str | None = None
 
     # --- Email ---
     resend_api_key: str | None = None
@@ -65,6 +71,18 @@ class Settings(BaseSettings):
         exactly the situation during initial local setup.
         """
         return bool(self.anthropic_api_key and self.voyage_api_key)
+
+    @property
+    def storage_configured(self) -> bool:
+        """Same graceful-degradation philosophy as the AI pipeline: photo/
+        video upload only turns on once all four R2 settings are present.
+        Until then, reports can still be submitted — just without media."""
+        return bool(
+            self.r2_account_id
+            and self.r2_access_key_id
+            and self.r2_secret_access_key
+            and self.r2_public_base_url
+        )
 
 
 @lru_cache

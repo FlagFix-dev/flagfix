@@ -11,6 +11,10 @@ class SignupRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     org_slug: str
     role: UserRole = UserRole.reporter
+    # Required only when role == resolver (staff) — the owner's institute
+    # staff code, checked in api/auth.py's signup(). Students never see or
+    # need this field; the server ignores it entirely for role == reporter.
+    staff_code: str | None = Field(default=None, max_length=32)
 
 
 class LoginRequest(BaseModel):

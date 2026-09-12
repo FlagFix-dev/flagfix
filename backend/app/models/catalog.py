@@ -22,3 +22,9 @@ class ProblemCategory(Base, UUIDPKMixin, TimestampMixin):
     default_department_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("departments.id"), nullable=True
     )
+    # Rough "how long does this usually take" estimate in hours, e.g. 2 for
+    # a Wi-Fi outage vs 48 for a structural repair. Purely a heuristic shown
+    # to reporters/staff as a "typical" figure (see api/orgs.py's default
+    # seed categories) — never a promise or an SLA target (SLARule is what
+    # actually drives escalation).
+    typical_resolution_hours: Mapped[Optional[int]] = mapped_column(nullable=True)

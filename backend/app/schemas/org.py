@@ -62,6 +62,40 @@ class CategoryResponse(BaseModel):
     id: uuid.UUID
     name: str
     default_department_id: uuid.UUID | None
+    typical_resolution_hours: int | None
 
     class Config:
         from_attributes = True
+
+
+class OrgProfileResponse(BaseModel):
+    """Returned by GET /api/orgs/me — an admin/owner-only view of the org's
+    own settings, including the staff invite code (never exposed to
+    reporters/resolvers, and never returned from the public signup/login
+    endpoints)."""
+    id: uuid.UUID
+    name: str
+    slug: str
+    type: OrgType
+    address: str | None
+    city: str | None
+    state: str | None
+    num_blocks: int | None
+    staff_code: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class OrgStatsResponse(BaseModel):
+    """Powers the admin/owner operations dashboard — see api/orgs.py's
+    GET /stats. `staff_online` is a best-effort "seen recently" heuristic
+    (last_seen_at touched at login/refresh and staff queue loads), not true
+    real-time presence."""
+    total_staff: int
+    staff_online: int
+    total_reports: int
+    pending: int  # reported/verified — nobody has accepted it yet
+    accepted: int  # assigned/in_progress/reopened — someone is actively on it
+    resolved: int
+    closed: int

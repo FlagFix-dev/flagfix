@@ -11,8 +11,8 @@ import { Alert } from "@/components/ui/alert";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ApiError, orgsApi } from "@/lib/api";
-import { LOCATION_TYPE_LABELS, STAFF_ROLES } from "@/lib/constants";
-import type { LocationResponse, LocationType } from "@/lib/types";
+import { ADMIN_ROLES, LOCATION_TYPE_LABELS, STAFF_ROLES } from "@/lib/constants";
+import type { LocationResponse, LocationType, OrgProfileResponse } from "@/lib/types";
 
 export default function LocationsPage() {
   const { claims } = useAuth();
@@ -27,7 +27,13 @@ export default function LocationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const [orgProfile, setOrgProfile] = useState<OrgProfileResponse | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+
   const isStaff = claims ? STAFF_ROLES.includes(claims.role) : false;
+  const isAdmin = claims ? ADMIN_ROLES.includes(claims.role) : false;
+  const isOwner = claims?.role === "owner";
 
   useEffect(() => {
     if (claims && !isStaff) router.replace("/dashboard");
@@ -39,6 +45,31 @@ export default function LocationsPage() {
       .then(setLocations)
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load locations."));
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    orgsApi.getProfile().then(setOrgProfile).catch(() => undefined);
+  }, [isAdmin]);
+
+  async function handleRegenerateCode() {
+    setRegenerating(true);
+    try {
+      const updated = await orgsApi.regenerateStaffCode();
+      setOrgProfile(updated);
+    } catch {
+      // Non-critical action — the existing code just stays visible/usable.
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
+  function copyCode() {
+    if (!orgProfile?.staff_code) return;
+    navigator.clipboard?.writeText(orgProfile.staff_code).then(() => {
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 1500);
+    });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -78,6 +109,33 @@ export default function LocationsPage() {
           areas like corridors and lobbies.
         </p>
       </div>
+
+      {isAdmin && orgProfile?.staff_code && (
+        <Card elevated className="bg-brand-gradient text-white">
+          <CardBody className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-white/70">
+                Institute staff code
+              </p>
+              <p className="mt-1 font-mono text-2xl font-bold tracking-widest">{orgProfile.staff_code}</p>
+              <p className="mt-1 max-w-md text-sm text-white/80">
+                Share this with your staff — they'll enter it when they sign up and choose "Staff",
+                so students can't grant themselves staff access.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={copyCode}>
+                {codeCopied ? "Copied!" : "Copy code"}
+              </Button>
+              {isOwner && (
+                <Button variant="secondary" size="sm" loading={regenerating} onClick={handleRegenerateCode}>
+                  Regenerate
+                </Button>
+              )}
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">

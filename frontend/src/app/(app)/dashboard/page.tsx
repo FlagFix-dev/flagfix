@@ -9,15 +9,37 @@ import { Select } from "@/components/ui/select";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { ProblemList } from "@/components/problems/problem-list";
 import { useAuth } from "@/components/auth/auth-provider";
-import { ApiError, problemsApi } from "@/lib/api";
-import { STATUS_LABELS, STAFF_ROLES } from "@/lib/constants";
-import { priorityBucketFor } from "@/lib/constants";
-import type { ProblemResponse, ProblemStatus } from "@/lib/types";
+import { ApiError, orgsApi, problemsApi } from "@/lib/api";
+import { ADMIN_ROLES, STATUS_LABELS, STAFF_ROLES, isQuickFix, priorityBucketFor } from "@/lib/constants";
+import type { OrgStatsResponse, ProblemResponse, ProblemStatus } from "@/lib/types";
 
-function StatTile({ label, value, tone }: { label: string; value: number; tone?: "danger" | "warning" }) {
-  const valueClass = tone === "danger" ? "text-red-600" : tone === "warning" ? "text-amber-600" : "text-ink-900";
+// A light "is this still fresh?" refresh for the staff queue and ops stats
+// — not a real-time websocket feed, just a periodic re-fetch so newly
+// accepted/updated problems and the staff-online count don't feel stale
+// during a long dashboard session. Always cleared on unmount below.
+const REFRESH_INTERVAL_MS = 45_000;
+
+function StatTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "danger" | "warning" | "brand" | "success";
+}) {
+  const valueClass =
+    tone === "danger"
+      ? "text-red-600"
+      : tone === "warning"
+        ? "text-amber-600"
+        : tone === "success"
+          ? "text-green-600"
+          : tone === "brand"
+            ? "text-brand-700"
+            : "text-ink-900";
   return (
-    <Card>
+    <Card elevated>
       <CardBody className="py-4">
         <p className="text-xs font-medium uppercase tracking-wide text-ink-500">{label}</p>
         <p className={`mt-1 text-2xl font-bold ${valueClass}`}>{value}</p>
@@ -29,20 +51,38 @@ function StatTile({ label, value, tone }: { label: string; value: number; tone?:
 export default function DashboardPage() {
   const { claims } = useAuth();
   const isStaff = claims ? STAFF_ROLES.includes(claims.role) : false;
+  const isAdmin = claims ? ADMIN_ROLES.includes(claims.role) : false;
 
   const [problems, setProblems] = useState<ProblemResponse[] | null>(null);
   const [statusFilter, setStatusFilter] = useState<ProblemStatus | "">("");
+  const [speedFilter, setSpeedFilter] = useState<"" | "quick" | "bigger">("");
+  const [orgStats, setOrgStats] = useState<OrgStatsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!claims) return;
-    const fetcher = isStaff
-      ? problemsApi.list({ status: statusFilter || undefined })
-      : problemsApi.listMine();
-    fetcher
-      .then(setProblems)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load reports."));
-  }, [claims, isStaff, statusFilter]);
+    let cancelled = false;
+
+    function load() {
+      const fetcher = isStaff
+        ? problemsApi.list({ status: statusFilter || undefined })
+        : problemsApi.listMine();
+      fetcher
+        .then((rows) => !cancelled && setProblems(rows))
+        .catch((err) => !cancelled && setError(err instanceof ApiError ? err.message : "Could not load reports."));
+
+      if (isAdmin) {
+        orgsApi.getStats().then((s) => !cancelled && setOrgStats(s)).catch(() => undefined);
+      }
+    }
+
+    load();
+    const interval = setInterval(load, REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [claims, isStaff, isAdmin, statusFilter]);
 
   const stats = useMemo(() => {
     if (!problems) return null;
@@ -51,6 +91,13 @@ export default function DashboardPage() {
     const overdue = open.filter((p) => p.sla_due_at && new Date(p.sla_due_at) < new Date());
     return { open: open.length, critical: critical.length, overdue: overdue.length };
   }, [problems]);
+
+  const filteredProblems = useMemo(() => {
+    if (!problems || !speedFilter) return problems;
+    return problems.filter((p) =>
+      speedFilter === "quick" ? isQuickFix(p.estimated_resolution_hours) : !isQuickFix(p.estimated_resolution_hours)
+    );
+  }, [problems, speedFilter]);
 
   if (!claims) return <FullPageSpinner />;
 
@@ -76,28 +123,71 @@ export default function DashboardPage() {
 
       {isStaff && stats && (
         <div className="grid grid-cols-3 gap-4">
-          <StatTile label="Open reports" value={stats.open} />
+          <StatTile label="Open reports" value={stats.open} tone="brand" />
           <StatTile label="Critical" value={stats.critical} tone="danger" />
           <StatTile label="Past SLA" value={stats.overdue} tone="warning" />
         </div>
       )}
 
+      {isAdmin && orgStats && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Team operations</CardTitle>
+          </CardHeader>
+          <CardBody className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+            <div>
+              <p className="text-xs text-ink-500">Staff online now</p>
+              <p className="mt-0.5 text-lg font-semibold text-green-600">
+                {orgStats.staff_online} <span className="text-sm font-normal text-ink-400">/ {orgStats.total_staff}</span>
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-500">Not yet accepted</p>
+              <p className="mt-0.5 text-lg font-semibold text-amber-600">{orgStats.pending}</p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-500">Being worked on</p>
+              <p className="mt-0.5 text-lg font-semibold text-brand-700">{orgStats.accepted}</p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-500">Resolved</p>
+              <p className="mt-0.5 text-lg font-semibold text-green-600">{orgStats.resolved}</p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-500">Total reports</p>
+              <p className="mt-0.5 text-lg font-semibold text-ink-900">{orgStats.total_reports}</p>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
       <Card>
-        <CardHeader className="flex items-center justify-between">
+        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>{isStaff ? "Queue" : "My reports"}</CardTitle>
           {isStaff && (
-            <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as ProblemStatus | "")}
-              className="h-9 w-44"
-            >
-              <option value="">All statuses</option>
-              {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
+            <div className="flex flex-wrap gap-2">
+              <Select
+                value={speedFilter}
+                onChange={(e) => setSpeedFilter(e.target.value as "" | "quick" | "bigger")}
+                className="h-9 w-40"
+              >
+                <option value="">Quick + bigger jobs</option>
+                <option value="quick">Quick fixes only</option>
+                <option value="bigger">Bigger jobs only</option>
+              </Select>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as ProblemStatus | "")}
+                className="h-9 w-44"
+              >
+                <option value="">All statuses</option>
+                {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </div>
           )}
         </CardHeader>
         <CardBody>
@@ -105,7 +195,7 @@ export default function DashboardPage() {
             <p className="py-8 text-center text-sm text-ink-500">Loading…</p>
           ) : (
             <ProblemList
-              problems={problems}
+              problems={filteredProblems ?? []}
               emptyMessage={
                 isStaff ? "Nothing matches this filter." : "You haven't reported anything yet."
               }

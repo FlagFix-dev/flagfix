@@ -1,9 +1,10 @@
 """Organizations, locations, departments, users, and each user's role
 within an org. This is the multi-tenant backbone every other table hangs off."""
 import uuid
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, ForeignKey, String, true
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, true
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +32,12 @@ class Organization(Base, UUIDPKMixin, TimestampMixin):
     # descriptive metadata for the owner's own reference; it does not
     # constrain how many Location rows they actually create below.
     num_blocks: Mapped[Optional[int]] = mapped_column(nullable=True)
+
+    # Shared secret the owner hands out to staff so self-signup can tell a
+    # genuine staff member from a student claiming to be one. Generated once
+    # at org creation (see api/orgs.py); the owner can view/regenerate it
+    # from the org settings screen. Never required for the `reporter` role.
+    staff_code: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
 
     locations: Mapped[list["Location"]] = relationship(back_populates="organization")
     departments: Mapped[list["Department"]] = relationship(back_populates="organization")
@@ -86,6 +93,12 @@ class User(Base, UUIDPKMixin, TimestampMixin):
     phone: Mapped[Optional[str]] = mapped_column(String(20), unique=True, nullable=True, index=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)
+    # Best-effort presence signal, touched on login/refresh and on staff
+    # queue loads (see api/auth.py, api/problems.py). Used only for the
+    # approximate "staff online now" count on the admin dashboard — this is
+    # not a real-time presence system (that would need websockets), just a
+    # "seen recently" heuristic, and is treated as such in api/orgs.py.
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     org_roles: Mapped[list["UserOrgRole"]] = relationship(back_populates="user")
 

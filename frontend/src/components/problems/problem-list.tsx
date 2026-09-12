@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PriorityBadge } from "./priority-badge";
 import { StatusBadge } from "./status-badge";
 import { formatDateTime, relativeDue } from "@/lib/utils";
+import { formatEstimatedTime, isQuickFix } from "@/lib/constants";
 import type { ProblemResponse } from "@/lib/types";
 
 export function ProblemList({
@@ -34,9 +35,24 @@ export function ProblemList({
                     </span>
                   )}
                 </div>
-                <p className="mt-0.5 text-xs text-ink-500">Reported {formatDateTime(p.created_at)}</p>
+                <p className="mt-0.5 text-xs text-ink-500">
+                  Reported {formatDateTime(p.created_at)}
+                  {p.attachments.length > 0 && ` · ${p.attachments.length} attachment${p.attachments.length > 1 ? "s" : ""}`}
+                </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                {p.estimated_resolution_hours !== null && p.status !== "resolved" && p.status !== "closed" && (
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                      isQuickFix(p.estimated_resolution_hours)
+                        ? "bg-green-50 text-green-700"
+                        : "bg-ink-100 text-ink-600"
+                    }`}
+                  >
+                    {isQuickFix(p.estimated_resolution_hours) ? "⚡ " : "🛠 "}
+                    {formatEstimatedTime(p.estimated_resolution_hours)}
+                  </span>
+                )}
                 <PriorityBadge score={p.priority_score} />
                 <StatusBadge status={p.status} />
                 {p.status !== "resolved" && p.status !== "closed" && (

@@ -15,16 +15,19 @@ enforced in the queries below by an explicit `.where(org_id == ...)`
 instead — reviewed carefully precisely because it's the exception, not
 the default.
 """
+import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.deps import CurrentUser, get_current_user, require_role
+from app.deps import CurrentUser, get_current_user, get_tenant_db, require_role
 from app.models.catalog import ProblemCategory
-from app.models.enums import UserRole
+from app.models.enums import ProblemStatus, UserRole
+from app.models.problem import Problem
 from app.models.tenancy import Department, Location, Organization, User, UserOrgRole
 from app.schemas.auth import TokenResponse
 from app.schemas.org import (
@@ -35,10 +38,34 @@ from app.schemas.org import (
     LocationCreateRequest,
     LocationResponse,
     OrgCreateRequest,
+    OrgProfileResponse,
+    OrgStatsResponse,
 )
 from app.security import create_access_token, create_refresh_token, hash_password
 
 router = APIRouter(prefix="/api/orgs", tags=["organizations"])
+
+# Seeded for every new institution so category-based routing and "how long
+# does this usually take" estimates work from day one, without an admin
+# having to configure anything first. Hours are rough MVP heuristics, not
+# promises — an admin can adjust them later via a future settings screen.
+# Matches the fixed category enum the AI extraction step uses (see
+# services/ai_extraction.py) so a report's AI-detected category always has
+# a matching row to attach to.
+_DEFAULT_CATEGORIES: list[tuple[str, int]] = [
+    ("IT", 2),
+    ("Electrical", 6),
+    ("Cleanliness", 4),
+    ("Security", 3),
+    ("Plumbing", 24),
+    ("Hostel/Residence", 24),
+    ("Infrastructure", 48),
+    ("Other", 24),
+]
+
+
+def _generate_staff_code() -> str:
+    return secrets.token_hex(4).upper()  # 8 hex chars, e.g. "A1B2C3D4"
 
 
 @router.post("", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -57,9 +84,13 @@ async def create_organization(
         city=payload.city,
         state=payload.state,
         num_blocks=payload.num_blocks,
+        staff_code=_generate_staff_code(),
     )
     session.add(org)
     await session.flush()
+
+    for name, hours in _DEFAULT_CATEGORIES:
+        session.add(ProblemCategory(org_id=org.id, name=name, typical_resolution_hours=hours))
 
     owner = User(name=payload.owner_name, email=payload.owner_email, password_hash=hash_password(payload.owner_password))
     session.add(owner)
@@ -158,3 +189,92 @@ async def list_categories(
     stmt = select(ProblemCategory).where(ProblemCategory.org_id == current_user.org_id).order_by(ProblemCategory.name)
     rows = (await session.execute(stmt)).scalars().all()
     return [CategoryResponse.model_validate(r) for r in rows]
+
+
+async def _get_own_org(session: AsyncSession, current_user: CurrentUser) -> Organization:
+    org = await session.get(Organization, current_user.org_id)
+    if org is None:
+        # Shouldn't happen for a validly-issued token, but never trust a
+        # JWT's org_id as proof the row still exists.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Organization not found.")
+    return org
+
+
+@router.get("/me", response_model=OrgProfileResponse)
+async def get_my_organization(
+    current_user: CurrentUser = Depends(require_role(UserRole.admin, UserRole.owner)),
+    session: AsyncSession = Depends(get_session),
+) -> OrgProfileResponse:
+    org = await _get_own_org(session, current_user)
+    return OrgProfileResponse.model_validate(org)
+
+
+@router.post("/me/regenerate-staff-code", response_model=OrgProfileResponse)
+async def regenerate_staff_code(
+    current_user: CurrentUser = Depends(require_role(UserRole.owner)),
+    session: AsyncSession = Depends(get_session),
+) -> OrgProfileResponse:
+    """Owner-only (not admin) — rotating the staff code invalidates it for
+    anyone who had it, including any admin who leaked it, so only the
+    owner can trigger that."""
+    org = await _get_own_org(session, current_user)
+    org.staff_code = _generate_staff_code()
+    await session.commit()
+    return OrgProfileResponse.model_validate(org)
+
+
+@router.get("/stats", response_model=OrgStatsResponse)
+async def get_org_stats(
+    current_user: CurrentUser = Depends(require_role(UserRole.admin, UserRole.owner)),
+    session: AsyncSession = Depends(get_tenant_db),
+) -> OrgStatsResponse:
+    """Powers the admin/owner operations dashboard: how much staff are
+    around, how much work is done vs. waiting vs. actively being worked.
+    Problem counts go through get_tenant_db (RLS-scoped); staff headcount
+    and presence come from UserOrgRole/User directly, filtered by org_id
+    explicitly since those tables aren't RLS-protected (see this file's
+    module docstring)."""
+    staff_role_stmt = select(func.count()).select_from(UserOrgRole).where(
+        UserOrgRole.org_id == current_user.org_id,
+        UserOrgRole.role.in_([UserRole.resolver, UserRole.admin, UserRole.owner]),
+    )
+    total_staff = (await session.execute(staff_role_stmt)).scalar_one()
+
+    online_cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+    online_stmt = (
+        select(func.count(func.distinct(User.id)))
+        .select_from(UserOrgRole)
+        .join(User, User.id == UserOrgRole.user_id)
+        .where(
+            UserOrgRole.org_id == current_user.org_id,
+            UserOrgRole.role.in_([UserRole.resolver, UserRole.admin, UserRole.owner]),
+            User.last_seen_at.is_not(None),
+            User.last_seen_at >= online_cutoff,
+        )
+    )
+    staff_online = (await session.execute(online_stmt)).scalar_one()
+
+    def _count(*statuses: ProblemStatus):
+        return select(func.count()).select_from(Problem).where(
+            Problem.org_id == current_user.org_id, Problem.status.in_(statuses)
+        )
+
+    total_reports = (
+        await session.execute(select(func.count()).select_from(Problem).where(Problem.org_id == current_user.org_id))
+    ).scalar_one()
+    pending = (await session.execute(_count(ProblemStatus.reported, ProblemStatus.verified))).scalar_one()
+    accepted = (
+        await session.execute(_count(ProblemStatus.assigned, ProblemStatus.in_progress, ProblemStatus.reopened))
+    ).scalar_one()
+    resolved = (await session.execute(_count(ProblemStatus.resolved))).scalar_one()
+    closed = (await session.execute(_count(ProblemStatus.closed))).scalar_one()
+
+    return OrgStatsResponse(
+        total_staff=total_staff,
+        staff_online=staff_online,
+        total_reports=total_reports,
+        pending=pending,
+        accepted=accepted,
+        resolved=resolved,
+        closed=closed,
+    )

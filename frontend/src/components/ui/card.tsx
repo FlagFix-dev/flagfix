@@ -1,10 +1,21 @@
 import { HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
-export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
+  /** Adds the "raised" depth treatment — used sparingly (stat tiles, the
+   * homepage) rather than on every card, so it reads as a deliberate
+   * accent rather than the app's default look. */
+  elevated?: boolean;
+}
+
+export function Card({ className, elevated, ...props }: CardProps) {
   return (
     <div
-      className={cn("rounded-2xl border border-ink-100 bg-white shadow-card", className)}
+      className={cn(
+        "rounded-2xl border bg-white",
+        elevated ? "border-transparent shadow-raised" : "border-ink-100 shadow-card",
+        className
+      )}
       {...props}
     />
   );

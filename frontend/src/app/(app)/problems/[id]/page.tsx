@@ -6,14 +6,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { PriorityBadge } from "@/components/problems/priority-badge";
 import { StatusBadge } from "@/components/problems/status-badge";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ApiError, orgsApi, problemsApi } from "@/lib/api";
-import { ALLOWED_TRANSITIONS, STATUS_LABELS, STAFF_ROLES } from "@/lib/constants";
+import { ALLOWED_TRANSITIONS, STATUS_LABELS, STAFF_ROLES, formatEstimatedTime } from "@/lib/constants";
 import { formatDateTime, relativeDue } from "@/lib/utils";
 import type { LocationResponse, ProblemResponse, ProblemStatus } from "@/lib/types";
+
+// Same lightweight "keep it feeling live" approach as the dashboard — a
+// plain re-fetch, not a websocket, so a reporter watching this page sees a
+// staff progress update without having to manually reload.
+const REFRESH_INTERVAL_MS = 20_000;
+
+const QUICK_PROGRESS_NOTES = ["Work started", "Technician on the way", "Almost done", "Waiting on parts"];
 
 export default function ProblemDetailPage() {
   const params = useParams<{ id: string }>();
@@ -26,6 +34,9 @@ export default function ProblemDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [transitioning, setTransitioning] = useState<ProblemStatus | null>(null);
+  const [accepting, setAccepting] = useState(false);
+  const [progressNote, setProgressNote] = useState("");
+  const [postingProgress, setPostingProgress] = useState(false);
 
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [feedbackComment, setFeedbackComment] = useState("");
@@ -44,6 +55,8 @@ export default function ProblemDetailPage() {
 
   useEffect(() => {
     load();
+    const interval = setInterval(load, REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
@@ -57,6 +70,34 @@ export default function ProblemDetailPage() {
       setError(err instanceof ApiError ? err.message : "Could not update status.");
     } finally {
       setTransitioning(null);
+    }
+  }
+
+  async function handleAccept() {
+    setError(null);
+    setAccepting(true);
+    try {
+      const updated = await problemsApi.accept(params.id);
+      setProblem(updated);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not accept this report.");
+    } finally {
+      setAccepting(false);
+    }
+  }
+
+  async function handlePostProgress(message: string) {
+    if (!message.trim()) return;
+    setError(null);
+    setPostingProgress(true);
+    try {
+      const updated = await problemsApi.postProgress(params.id, { message: message.trim() });
+      setProblem(updated);
+      setProgressNote("");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not post that update.");
+    } finally {
+      setPostingProgress(false);
     }
   }
 
@@ -95,6 +136,8 @@ export default function ProblemDetailPage() {
   const reasons = (problem.priority_reasons?.reasons as string[] | undefined) ?? [];
   const nextSteps = ALLOWED_TRANSITIONS[problem.status];
   const canGiveFeedback = !isStaff && problem.status === "resolved" && !feedbackSubmitted;
+  const canAccept = isStaff && !problem.assigned_to_user_id && (problem.status === "reported" || problem.status === "verified");
+  const canPostProgress = isStaff && problem.status !== "resolved" && problem.status !== "closed";
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -124,6 +167,21 @@ export default function ProblemDetailPage() {
             <p className="text-sm text-ink-700">{problem.description}</p>
           </div>
 
+          {problem.attachments.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {problem.attachments.map((a) =>
+                a.content_type.startsWith("video/") ? (
+                  <video key={a.id} src={a.url} controls className="aspect-square rounded-xl border border-ink-100 object-cover" />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <a key={a.id} href={a.url} target="_blank" rel="noreferrer">
+                    <img src={a.url} alt="" className="aspect-square rounded-xl border border-ink-100 object-cover" />
+                  </a>
+                )
+              )}
+            </div>
+          )}
+
           <dl className="grid grid-cols-2 gap-4 border-t border-ink-100 pt-4 text-sm">
             <div>
               <dt className="text-ink-500">Location</dt>
@@ -141,6 +199,12 @@ export default function ProblemDetailPage() {
                 {due.label}
               </dd>
             </div>
+            {problem.estimated_resolution_hours !== null && (
+              <div>
+                <dt className="text-ink-500">Typical time for this kind of issue</dt>
+                <dd className="mt-0.5 text-ink-900">{formatEstimatedTime(problem.estimated_resolution_hours)}</dd>
+              </div>
+            )}
             {problem.safety_flag && (
               <div>
                 <dt className="text-ink-500">Safety</dt>
@@ -162,6 +226,32 @@ export default function ProblemDetailPage() {
         </CardBody>
       </Card>
 
+      {problem.latest_update && (
+        <Card elevated className="border-l-4 border-l-brand-500">
+          <CardBody className="flex items-start gap-3 py-4">
+            <span className="mt-0.5 flex h-2 w-2 shrink-0 animate-pulse rounded-full bg-brand-500" />
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-brand-600">Live update</p>
+              <p className="mt-0.5 text-sm text-ink-800">{problem.latest_update}</p>
+              {problem.latest_update_at && (
+                <p className="mt-0.5 text-xs text-ink-400">{formatDateTime(problem.latest_update_at)}</p>
+              )}
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {canAccept && (
+        <Card>
+          <CardBody className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-ink-700">Nobody's taken this one yet.</p>
+            <Button loading={accepting} onClick={handleAccept}>
+              Accept this problem
+            </Button>
+          </CardBody>
+        </Card>
+      )}
+
       {isStaff && nextSteps.length > 0 && (
         <Card>
           <CardHeader>
@@ -178,6 +268,40 @@ export default function ProblemDetailPage() {
                 Mark {STATUS_LABELS[step].toLowerCase()}
               </Button>
             ))}
+          </CardBody>
+        </Card>
+      )}
+
+      {canPostProgress && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Post a live update</CardTitle>
+          </CardHeader>
+          <CardBody className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {QUICK_PROGRESS_NOTES.map((note) => (
+                <button
+                  key={note}
+                  type="button"
+                  onClick={() => handlePostProgress(note)}
+                  disabled={postingProgress}
+                  className="rounded-full border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-700 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
+                >
+                  {note}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Or write your own, e.g. 'Technician arriving in 30 minutes'"
+                value={progressNote}
+                onChange={(e) => setProgressNote(e.target.value)}
+                maxLength={300}
+              />
+              <Button loading={postingProgress} onClick={() => handlePostProgress(progressNote)}>
+                Post
+              </Button>
+            </div>
           </CardBody>
         </Card>
       )}

@@ -1,14 +1,18 @@
 import { clearSession, getSession, updateTokens } from "./session";
 import type {
+  AttachmentResponse,
   CategoryResponse,
   DepartmentResponse,
   FeedbackRequest,
   LocationCreateRequest,
   LocationResponse,
   OrgCreateRequest,
+  OrgProfileResponse,
+  OrgStatsResponse,
   ProblemCreateRequest,
   ProblemResponse,
   ProblemStatus,
+  ProgressUpdateRequest,
   SelfSignupRole,
   StatusChangeRequest,
   TokenResponse,
@@ -134,6 +138,7 @@ export const authApi = {
     password: string;
     org_slug: string;
     role: SelfSignupRole;
+    staff_code?: string | null;
   }) => request<TokenResponse>("/api/auth/signup", { method: "POST", body: input, auth: false }),
 
   login: (input: { email: string; password: string; org_slug: string }) =>
@@ -160,13 +165,50 @@ export const orgsApi = {
 
   createCategory: (input: { name: string; default_department_id?: string | null }) =>
     request<CategoryResponse>("/api/orgs/categories", { method: "POST", body: input }),
+
+  getProfile: () => request<OrgProfileResponse>("/api/orgs/me"),
+
+  regenerateStaffCode: () =>
+    request<OrgProfileResponse>("/api/orgs/me/regenerate-staff-code", { method: "POST" }),
+
+  getStats: () => request<OrgStatsResponse>("/api/orgs/stats"),
 };
 
 // --- Problems -------------------------------------------------------------
 
+/** Multipart upload can't go through the JSON `request()` helper above (the
+ * browser needs to set its own multipart boundary on the Content-Type
+ * header, so we must NOT set one ourselves). This mirrors request()'s
+ * auth + one-time-refresh-on-401 behavior for this one call. */
+async function uploadAttachments(files: File[]): Promise<AttachmentResponse[]> {
+  const formData = new FormData();
+  for (const file of files) formData.append("files", file);
+
+  async function doUpload(): Promise<Response> {
+    const session = getSession();
+    const headers: Record<string, string> = {};
+    if (session) headers.Authorization = `Bearer ${session.accessToken}`;
+    return fetch(`${API_URL}/api/problems/attachments`, { method: "POST", headers, body: formData });
+  }
+
+  let res = await doUpload();
+  if (res.status === 401) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) res = await doUpload();
+    else {
+      clearSession();
+      throw new ApiError("Your session has expired. Please log in again.", 401);
+    }
+  }
+  if (!res.ok) throw new ApiError(await extractErrorMessage(res), res.status);
+  return (await res.json()) as AttachmentResponse[];
+}
+
 export const problemsApi = {
   create: (input: ProblemCreateRequest) =>
     request<ProblemResponse>("/api/problems", { method: "POST", body: input }),
+
+  uploadAttachments,
 
   listMine: () => request<ProblemResponse[]>("/api/problems/mine"),
 
@@ -174,6 +216,11 @@ export const problemsApi = {
     request<ProblemResponse[]>("/api/problems", { query: filters }),
 
   get: (id: string) => request<ProblemResponse>(`/api/problems/${id}`),
+
+  accept: (id: string) => request<ProblemResponse>(`/api/problems/${id}/accept`, { method: "POST" }),
+
+  postProgress: (id: string, input: ProgressUpdateRequest) =>
+    request<ProblemResponse>(`/api/problems/${id}/progress`, { method: "POST", body: input }),
 
   changeStatus: (id: string, input: StatusChangeRequest) =>
     request<ProblemResponse>(`/api/problems/${id}/status`, { method: "POST", body: input }),

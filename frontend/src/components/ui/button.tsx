@@ -11,10 +11,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<Variant, string> = {
+  // The primary button is one of the few deliberately "raised" elements —
+  // a subtle gradient + lift-on-hover shadow gives it a light 3D feel
+  // without applying that treatment everywhere.
   primary:
-    "bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 disabled:bg-brand-300 shadow-sm",
+    "bg-brand-gradient text-white shadow-raised hover:shadow-raised-hover hover:-translate-y-0.5 active:translate-y-0 disabled:bg-none disabled:bg-brand-300 disabled:shadow-none disabled:hover:translate-y-0",
   secondary:
-    "bg-white text-ink-800 border border-ink-200 hover:bg-ink-50 active:bg-ink-100 disabled:text-ink-400",
+    "bg-white text-ink-800 border border-ink-200 hover:bg-ink-50 hover:border-ink-300 active:bg-ink-100 disabled:text-ink-400",
   ghost: "bg-transparent text-ink-700 hover:bg-ink-100 active:bg-ink-200",
   danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800 disabled:bg-red-300",
 };
@@ -32,7 +35,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         disabled={disabled || loading}
         className={cn(
-          "inline-flex items-center justify-center gap-2 font-medium transition-colors duration-150",
+          "inline-flex items-center justify-center gap-2 font-medium transition-all duration-150",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2",
           "disabled:cursor-not-allowed",
           variantClasses[variant],

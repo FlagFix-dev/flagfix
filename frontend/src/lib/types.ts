@@ -85,13 +85,27 @@ export interface CategoryResponse {
   id: string;
   name: string;
   default_department_id: string | null;
+  /** Rough "how long this usually takes" heuristic in hours — see
+   * backend/app/api/orgs.py's seeded defaults. Not an SLA promise. */
+  typical_resolution_hours: number | null;
+}
+
+export interface AttachmentInput {
+  url: string;
+  content_type: string;
+}
+
+export interface AttachmentResponse {
+  id: string;
+  url: string;
+  content_type: string;
 }
 
 export interface ProblemCreateRequest {
   description: string;
   location_id: string;
   landmark?: string | null;
-  attachment_urls: string[];
+  attachments: AttachmentInput[];
 }
 
 export interface ProblemResponse {
@@ -102,6 +116,7 @@ export interface ProblemResponse {
   location_id: string;
   category_id: string | null;
   department_id: string | null;
+  assigned_to_user_id: string | null;
   status: ProblemStatus;
   severity: number;
   urgency: number;
@@ -109,6 +124,10 @@ export interface ProblemResponse {
   priority_score: number;
   priority_reasons: Record<string, unknown>;
   cluster_id: string | null;
+  estimated_resolution_hours: number | null;
+  latest_update: string | null;
+  latest_update_at: string | null;
+  attachments: AttachmentResponse[];
   sla_due_at: string | null;
   sla_breached: boolean;
   created_at: string;
@@ -120,10 +139,36 @@ export interface StatusChangeRequest {
   note?: string | null;
 }
 
+export interface ProgressUpdateRequest {
+  message: string;
+}
+
 export interface FeedbackRequest {
   resolved_confirmed: boolean;
   rating?: number | null;
   comment?: string | null;
+}
+
+export interface OrgProfileResponse {
+  id: string;
+  name: string;
+  slug: string;
+  type: OrgType;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  num_blocks: number | null;
+  staff_code: string | null;
+}
+
+export interface OrgStatsResponse {
+  total_staff: number;
+  staff_online: number;
+  total_reports: number;
+  pending: number;
+  accepted: number;
+  resolved: number;
+  closed: number;
 }
 
 export interface ApiErrorBody {

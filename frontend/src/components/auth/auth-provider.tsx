@@ -18,6 +18,7 @@ interface AuthContextValue {
     password: string;
     org_slug: string;
     role: SelfSignupRole;
+    staff_code?: string | null;
   }) => Promise<void>;
   createOrg: (input: OrgCreateRequest) => Promise<void>;
   logout: () => void;
