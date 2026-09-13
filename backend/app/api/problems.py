@@ -341,13 +341,15 @@ async def get_ai_status(
     names; never the API keys themselves.
     """
     settings = get_settings()
-    extraction_on = bool(settings.anthropic_api_key)
-    similarity_on = bool(settings.voyage_api_key)
+    extraction_provider = settings.active_ai_provider
+    embedding_provider = settings.active_embedding_provider
     return AiStatusResponse(
-        extraction_enabled=extraction_on,
-        similarity_enabled=similarity_on,
-        extraction_model=settings.anthropic_model if extraction_on else None,
-        embedding_model=settings.voyage_embed_model if similarity_on else None,
+        extraction_enabled=extraction_provider is not None,
+        similarity_enabled=embedding_provider is not None,
+        extraction_provider=extraction_provider,
+        embedding_provider=embedding_provider,
+        extraction_model=settings.active_ai_model,
+        embedding_model=settings.active_embedding_model,
     )
 
 

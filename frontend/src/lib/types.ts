@@ -240,6 +240,10 @@ export interface ClusterResponse {
 export interface AiStatusResponse {
   extraction_enabled: boolean;
   similarity_enabled: boolean;
+  /** Which vendor is actually serving each half — "gemini" | "anthropic"
+   * for extraction, "gemini" | "voyage" for embeddings. */
+  extraction_provider: string | null;
+  embedding_provider: string | null;
   extraction_model: string | null;
   embedding_model: string | null;
 }

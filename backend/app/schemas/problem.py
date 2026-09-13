@@ -131,9 +131,17 @@ class ClusterResponse(BaseModel):
 class AiStatusResponse(BaseModel):
     """Lets the UI say plainly whether the AI pipeline is actually running
     or whether reports are going through the rule-based fallback — so
-    nobody mistakes fallback output for real AI analysis."""
-    extraction_enabled: bool  # ANTHROPIC_API_KEY present
-    similarity_enabled: bool  # VOYAGE_API_KEY present
+    nobody mistakes fallback output for real AI analysis.
+
+    Reports the provider as well as the model, because FlagFix can run
+    either half on more than one vendor and "which one am I actually
+    paying?" is the first question when a bill or a quality change shows
+    up. Never exposes the keys themselves.
+    """
+    extraction_enabled: bool
+    similarity_enabled: bool
+    extraction_provider: str | None  # "gemini" | "anthropic" | None
+    embedding_provider: str | None  # "gemini" | "voyage" | None
     extraction_model: str | None
     embedding_model: str | None
 

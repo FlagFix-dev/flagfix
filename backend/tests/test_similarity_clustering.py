@@ -117,7 +117,7 @@ async def test_paraphrased_reports_of_the_same_problem_are_clustered_together(or
         matches = await similarity.find_similar(session, org_id=org_id, new_embedding=paraphrase_vector)
         matches = [m for m in matches if m.problem.id != p2.id]
         assert matches, "expected the paraphrase to match report 1"
-        assert matches[0].similarity >= similarity.AUTO_MATCH_THRESHOLD, (
+        assert matches[0].similarity >= similarity.auto_match_threshold(), (
             f"expected a confident match, got similarity={matches[0].similarity}"
         )
 

@@ -32,11 +32,48 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
 
-    # --- AI providers ---
+    # --- AI provider selection ---
+    # FlagFix needs two different AI capabilities, and either can be served
+    # by more than one vendor:
+    #   * extraction  — reading a report into structured fields (a chat model)
+    #   * embedding   — turning a report into a vector so meaning can be
+    #                   compared (an embedding model)
+    #
+    # "auto" picks whichever provider has a key configured, preferring
+    # Google, because Google's free tier needs no payment method at all.
+    # Set explicitly to pin a provider even when both keys are present.
+    ai_provider: str = "auto"  # auto | gemini | anthropic
+    embedding_provider: str = "auto"  # auto | gemini | voyage
+
+    # --- Google (Gemini) ---
+    # One key serves both capabilities, which is why this is the default:
+    # a single account, and no card or UPI needed to start.
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_embed_model: str = "gemini-embedding-001"
+
+    # --- Anthropic ---
     anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-haiku-4-5"
+    # Pinned to a dated snapshot rather than the `claude-haiku-4-5` alias.
+    # The alias silently follows the newest snapshot, which means the
+    # model could change underneath us mid-evaluation — exactly what you
+    # don't want while tuning prompts and judging output quality. Anthropic
+    # never changes the weights behind a dated id.
+    anthropic_model: str = "claude-haiku-4-5-20251001"
     voyage_api_key: str | None = None
-    voyage_embed_model: str = "voyage-3.5-lite"
+    # voyage-4-lite, not the older voyage-3.5-lite: same price, same 1024
+    # dimensions (so no schema change — see EMBEDDING_DIM in
+    # models/problem.py), better quality, and critically it carries a
+    # 200M-token free allowance that the deprecated 3.5 models no longer do.
+    voyage_embed_model: str = "voyage-4-lite"
+
+    # --- AI tuning ---
+    # Exposed as settings rather than hard-coded constants so these can be
+    # adjusted from the hosting dashboard during evaluation, without a code
+    # change and redeploy each time. See services/similarity.py for what
+    # they mean and how to tune them.
+    similarity_auto_match_threshold: float = 0.82
+    similarity_review_threshold: float = 0.70
 
     # --- Object storage (any S3-compatible provider) ---
     # Deliberately provider-agnostic rather than hard-coded to one vendor:
@@ -72,15 +109,63 @@ class Settings(BaseSettings):
         return self.environment.lower() == "production"
 
     @property
+    def active_ai_provider(self) -> str | None:
+        """Which provider will actually read reports, or None for neither.
+
+        Resolution is deliberately key-driven rather than name-driven: a
+        provider pinned by name but missing its key resolves to None, so a
+        typo'd key never silently falls through to the other vendor and
+        bills the wrong account.
+        """
+        choice = (self.ai_provider or "auto").strip().lower()
+        if choice == "gemini":
+            return "gemini" if self.gemini_api_key else None
+        if choice == "anthropic":
+            return "anthropic" if self.anthropic_api_key else None
+        # auto — prefer Google, whose free tier needs no payment method.
+        if self.gemini_api_key:
+            return "gemini"
+        if self.anthropic_api_key:
+            return "anthropic"
+        return None
+
+    @property
+    def active_embedding_provider(self) -> str | None:
+        """Which provider will turn reports into vectors, or None."""
+        choice = (self.embedding_provider or "auto").strip().lower()
+        if choice == "gemini":
+            return "gemini" if self.gemini_api_key else None
+        if choice == "voyage":
+            return "voyage" if self.voyage_api_key else None
+        if self.gemini_api_key:
+            return "gemini"
+        if self.voyage_api_key:
+            return "voyage"
+        return None
+
+    @property
+    def active_ai_model(self) -> str | None:
+        """The model id the active extraction provider will be called with."""
+        return {"gemini": self.gemini_model, "anthropic": self.anthropic_model}.get(
+            self.active_ai_provider or ""
+        )
+
+    @property
+    def active_embedding_model(self) -> str | None:
+        return {"gemini": self.gemini_embed_model, "voyage": self.voyage_embed_model}.get(
+            self.active_embedding_provider or ""
+        )
+
+    @property
     def ai_pipeline_enabled(self) -> bool:
         """
-        The AI pipeline (classification + embeddings) only runs when both
-        provider keys are configured. This lets the app boot and be tested
-        end-to-end (with a safe rule-based fallback, see services/ai_extraction.py
-        and services/embeddings.py) before real API keys are wired in —
-        exactly the situation during initial local setup.
+        True only when BOTH halves of the pipeline have a usable provider:
+        something to read reports, and something to compare them. Each half
+        degrades independently (see services/ai_extraction.py and
+        services/embeddings.py), so the app runs fine with one, neither, or
+        both — this flag is just the honest headline for /health.
         """
-        return bool(self.anthropic_api_key and self.voyage_api_key)
+        return bool(self.active_ai_provider and self.active_embedding_provider)
 
     @property
     def storage_configured(self) -> bool:

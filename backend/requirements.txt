@@ -23,6 +23,10 @@ celery==5.4.0
 redis==5.0.8
 
 # --- AI providers ---
+# All three are optional at runtime: services/ai_extraction.py and
+# services/embeddings.py import them lazily and fall back cleanly, so the
+# app runs with any one provider configured, or none at all.
+google-genai==2.23.0
 anthropic==0.34.2
 voyageai==0.2.3
 

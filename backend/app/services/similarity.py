@@ -15,11 +15,23 @@ signal shown to the admin ("3 reports, all within Block A / Floor 3"),
 never as a hard pre-filter that could hide a real duplicate.
 
 Thresholds (tune these based on real pilot data, not guesswork forever):
-  >= AUTO_MATCH_THRESHOLD   -> confidently the same problem: auto-attach to
+  >= auto-match threshold   -> confidently the same problem: auto-attach to
                                 cluster (or create one with the earlier report)
-  >= REVIEW_THRESHOLD       -> plausibly related: recorded as a `related`
+  >= review threshold       -> plausibly related: recorded as a `related`
                                 relationship for an admin to see, NOT auto-merged
-  below REVIEW_THRESHOLD    -> treated as an unrelated, standalone report
+  below review threshold    -> treated as an unrelated, standalone report
+
+Both thresholds are read from settings (SIMILARITY_AUTO_MATCH_THRESHOLD and
+SIMILARITY_REVIEW_THRESHOLD) rather than being fixed constants, because the
+right values can only be learned by watching real reports. Tuning guide:
+
+  * Reports that clearly describe the same problem are NOT being grouped
+    -> lower the auto-match threshold (try 0.78, then 0.75).
+  * Unrelated reports ARE being grouped together
+    -> raise it (try 0.85, then 0.88).
+
+Change one value at a time and re-test; moving both at once makes it
+impossible to tell which one helped.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -27,11 +39,20 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models.problem import Problem, ProblemCluster, ProblemEmbedding, ProblemRelationship
 from app.models.enums import ClusterStatus, ProblemStatus, RelationshipType
 
-AUTO_MATCH_THRESHOLD = 0.82
-REVIEW_THRESHOLD = 0.70
+def auto_match_threshold() -> float:
+    """Similarity at or above which two reports are treated as the same
+    problem and merged into one cluster."""
+    return get_settings().similarity_auto_match_threshold
+
+
+def review_threshold() -> float:
+    """Similarity at or above which two reports are recorded as *related*
+    for a human to look at, without being merged automatically."""
+    return get_settings().similarity_review_threshold
 LOOKBACK_DAYS = 90  # ignore matches against very old reports; a 2-year-old
                      # fixed issue shouldn't silently reopen for an unrelated new one
 
@@ -77,11 +98,16 @@ async def attach_to_cluster_or_create(
     """
     best = matches[0] if matches else None
 
+    # Read once per call so a single request can't see two different values
+    # mid-way through its own decision.
+    auto_match = auto_match_threshold()
+    review = review_threshold()
+
     for match in matches:
-        if match.similarity >= REVIEW_THRESHOLD:
+        if match.similarity >= review:
             rel_type = (
                 RelationshipType.duplicate
-                if match.similarity >= AUTO_MATCH_THRESHOLD
+                if match.similarity >= auto_match
                 else RelationshipType.related
             )
             session.add(
@@ -93,7 +119,7 @@ async def attach_to_cluster_or_create(
                 )
             )
 
-    if best is None or best.similarity < AUTO_MATCH_THRESHOLD:
+    if best is None or best.similarity < auto_match:
         return None  # no confident match: this report stands alone for now
 
     now = datetime.now(timezone.utc)
