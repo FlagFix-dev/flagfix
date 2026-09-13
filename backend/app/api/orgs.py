@@ -19,6 +19,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import anyio.to_thread
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,8 @@ from app.schemas.org import (
     DepartmentResponse,
     LocationCreateRequest,
     LocationResponse,
+    MemberListResponse,
+    MemberResponse,
     OrgCreateRequest,
     OrgProfileResponse,
     OrgStatsResponse,
@@ -76,7 +79,18 @@ async def create_organization(
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "That workspace URL is already taken.")
 
+    # Ids are generated here rather than left to the column default, which
+    # SQLAlchemy only evaluates during flush — `org.id` would still be None
+    # at the point the rows below need to reference it. Knowing both ids up
+    # front lets every row go to the database as one batch committed in a
+    # single round trip, instead of the flush-wait-flush-wait pattern a
+    # database-generated id would force. On a cross-region database each
+    # avoided round trip is a real 150-250ms off the signup wait.
+    org_id = uuid.uuid4()
+    owner_id = uuid.uuid4()
+
     org = Organization(
+        id=org_id,
         name=payload.org_name,
         slug=payload.org_slug,
         type=payload.org_type,
@@ -86,17 +100,25 @@ async def create_organization(
         num_blocks=payload.num_blocks,
         staff_code=_generate_staff_code(),
     )
-    session.add(org)
-    await session.flush()
-
-    for name, hours in _DEFAULT_CATEGORIES:
-        session.add(ProblemCategory(org_id=org.id, name=name, typical_resolution_hours=hours))
-
-    owner = User(name=payload.owner_name, email=payload.owner_email, password_hash=hash_password(payload.owner_password))
-    session.add(owner)
-    await session.flush()
-
-    session.add(UserOrgRole(user_id=owner.id, org_id=org.id, role=UserRole.owner))
+    owner = User(
+        id=owner_id,
+        name=payload.owner_name,
+        email=payload.owner_email,
+        # bcrypt is intentionally slow (~250ms). Run it off the event loop
+        # so one signup doesn't freeze every other request on the worker.
+        password_hash=await anyio.to_thread.run_sync(hash_password, payload.owner_password),
+    )
+    session.add_all(
+        [
+            org,
+            owner,
+            UserOrgRole(user_id=owner_id, org_id=org_id, role=UserRole.owner),
+            *(
+                ProblemCategory(org_id=org_id, name=name, typical_resolution_hours=hours)
+                for name, hours in _DEFAULT_CATEGORIES
+            ),
+        ]
+    )
     await session.commit()
 
     return TokenResponse(
@@ -242,6 +264,68 @@ async def regenerate_staff_code(
     return OrgProfileResponse.model_validate(org)
 
 
+@router.get("/members", response_model=MemberListResponse)
+async def list_members(
+    current_user: CurrentUser = Depends(require_role(UserRole.admin, UserRole.owner)),
+    session: AsyncSession = Depends(get_session),
+) -> MemberListResponse:
+    """
+    Everyone who has joined this institution's workspace, with who is
+    currently around.
+
+    "Online" is a best-effort signal, not true presence: it means the
+    person's session was active within the last 15 minutes (see
+    User.last_seen_at, touched on login, token refresh, and staff queue
+    loads). Real-time presence would need websockets; this is honest about
+    being an approximation and is labelled that way in the UI.
+    """
+    online_cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+
+    rows = (
+        await session.execute(
+            select(User, UserOrgRole)
+            .join(UserOrgRole, UserOrgRole.user_id == User.id)
+            .where(UserOrgRole.org_id == current_user.org_id)
+            .order_by(User.name)
+        )
+    ).all()
+
+    members: list[MemberResponse] = []
+    total_students = total_staff = students_online = staff_online = 0
+
+    for user, role_row in rows:
+        is_online = user.last_seen_at is not None and user.last_seen_at >= online_cutoff
+        is_student = role_row.role == UserRole.reporter
+
+        if is_student:
+            total_students += 1
+            students_online += 1 if is_online else 0
+        else:
+            total_staff += 1
+            staff_online += 1 if is_online else 0
+
+        members.append(
+            MemberResponse(
+                id=user.id,
+                name=user.name,
+                email=user.email,
+                role=role_row.role,
+                is_active=user.is_active,
+                last_seen_at=user.last_seen_at,
+                is_online=is_online,
+                joined_at=role_row.created_at,
+            )
+        )
+
+    return MemberListResponse(
+        total_students=total_students,
+        total_staff=total_staff,
+        students_online=students_online,
+        staff_online=staff_online,
+        members=members,
+    )
+
+
 @router.get("/stats", response_model=OrgStatsResponse)
 async def get_org_stats(
     current_user: CurrentUser = Depends(require_role(UserRole.admin, UserRole.owner)),
@@ -253,47 +337,58 @@ async def get_org_stats(
     and presence come from UserOrgRole/User directly, filtered by org_id
     explicitly since those tables aren't RLS-protected (see this file's
     module docstring)."""
-    staff_role_stmt = select(func.count()).select_from(UserOrgRole).where(
-        UserOrgRole.org_id == current_user.org_id,
-        UserOrgRole.role.in_([UserRole.resolver, UserRole.admin, UserRole.owner]),
-    )
-    total_staff = (await session.execute(staff_role_stmt)).scalar_one()
-
     online_cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
-    online_stmt = (
-        select(func.count(func.distinct(User.id)))
-        .select_from(UserOrgRole)
-        .join(User, User.id == UserOrgRole.user_id)
-        .where(
-            UserOrgRole.org_id == current_user.org_id,
-            UserOrgRole.role.in_([UserRole.resolver, UserRole.admin, UserRole.owner]),
-            User.last_seen_at.is_not(None),
-            User.last_seen_at >= online_cutoff,
-        )
-    )
-    staff_online = (await session.execute(online_stmt)).scalar_one()
 
-    def _count(*statuses: ProblemStatus):
-        return select(func.count()).select_from(Problem).where(
-            Problem.org_id == current_user.org_id, Problem.status.in_(statuses)
+    # One pass over `problems` with conditional aggregates, rather than five
+    # separate COUNT queries. On a database in another region — which is the
+    # normal deployment shape here — each query is a separate round trip of
+    # 150-250ms, so collapsing five into one is the difference between a
+    # dashboard that feels instant and one that visibly hangs. This endpoint
+    # is also polled every 45 seconds, which multiplies the saving.
+    problem_counts = (
+        await session.execute(
+            select(
+                func.count().label("total"),
+                func.count()
+                .filter(Problem.status.in_([ProblemStatus.reported, ProblemStatus.verified]))
+                .label("pending"),
+                func.count()
+                .filter(
+                    Problem.status.in_(
+                        [ProblemStatus.assigned, ProblemStatus.in_progress, ProblemStatus.reopened]
+                    )
+                )
+                .label("accepted"),
+                func.count().filter(Problem.status == ProblemStatus.resolved).label("resolved"),
+                func.count().filter(Problem.status == ProblemStatus.closed).label("closed"),
+            ).where(Problem.org_id == current_user.org_id)
         )
+    ).one()
 
-    total_reports = (
-        await session.execute(select(func.count()).select_from(Problem).where(Problem.org_id == current_user.org_id))
-    ).scalar_one()
-    pending = (await session.execute(_count(ProblemStatus.reported, ProblemStatus.verified))).scalar_one()
-    accepted = (
-        await session.execute(_count(ProblemStatus.assigned, ProblemStatus.in_progress, ProblemStatus.reopened))
-    ).scalar_one()
-    resolved = (await session.execute(_count(ProblemStatus.resolved))).scalar_one()
-    closed = (await session.execute(_count(ProblemStatus.closed))).scalar_one()
+    # Likewise: staff headcount and "seen recently" headcount in one query.
+    staff_counts = (
+        await session.execute(
+            select(
+                func.count().label("total_staff"),
+                func.count()
+                .filter(User.last_seen_at.is_not(None), User.last_seen_at >= online_cutoff)
+                .label("online"),
+            )
+            .select_from(UserOrgRole)
+            .join(User, User.id == UserOrgRole.user_id)
+            .where(
+                UserOrgRole.org_id == current_user.org_id,
+                UserOrgRole.role.in_([UserRole.resolver, UserRole.admin, UserRole.owner]),
+            )
+        )
+    ).one()
 
     return OrgStatsResponse(
-        total_staff=total_staff,
-        staff_online=staff_online,
-        total_reports=total_reports,
-        pending=pending,
-        accepted=accepted,
-        resolved=resolved,
-        closed=closed,
+        total_staff=staff_counts.total_staff,
+        staff_online=staff_counts.online,
+        total_reports=problem_counts.total,
+        pending=problem_counts.pending,
+        accepted=problem_counts.accepted,
+        resolved=problem_counts.resolved,
+        closed=problem_counts.closed,
     )

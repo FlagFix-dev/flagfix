@@ -2,13 +2,71 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------
+   Theme palettes.
+
+   Every colour token is a CSS variable, so switching theme is a single
+   class on <html> rather than a `dark:` variant on every element. `ink`
+   is a SEMANTIC scale: ink-900 always means "strongest text" and ink-50
+   always means "page background", which is why the dark palette inverts
+   the scale rather than merely darkening it.
+
+   Values are space-separated RGB channels (not hex) because Tailwind
+   composes them with an alpha channel — that's what keeps `bg-ink-50/60`
+   and similar working in both themes.
+   ------------------------------------------------------------------ */
 :root {
   color-scheme: light;
+
+  --surface: 255 255 255;
+
+  --ink-50: 247 248 250;
+  --ink-100: 238 240 244;
+  --ink-200: 221 225 232;
+  --ink-300: 195 201 212;
+  --ink-400: 152 161 179;
+  --ink-500: 112 123 145;
+  --ink-600: 84 94 116;
+  --ink-700: 63 71 92;
+  --ink-800: 40 46 61;
+  --ink-900: 22 26 36;
+
+  --brand-50: 238 244 255;
+  --brand-100: 223 233 255;
+  --accent-50: 244 240 255;
+  --accent-100: 233 224 255;
+}
+
+.dark {
+  color-scheme: dark; /* themes native scrollbars, selects and date pickers */
+
+  /* Cards sit slightly ABOVE the page background rather than below it,
+     which is what makes elevation read correctly in a dark theme — in
+     dark UIs, closer to the light means lighter, not darker. */
+  --surface: 26 30 39;
+
+  --ink-50: 18 21 28; /* page background */
+  --ink-100: 30 34 44; /* hairline borders */
+  --ink-200: 42 47 59;
+  --ink-300: 58 65 80;
+  --ink-400: 107 116 134; /* placeholder text */
+  --ink-500: 139 148 166;
+  --ink-600: 170 179 196; /* secondary text */
+  --ink-700: 198 205 217;
+  --ink-800: 226 231 239;
+  --ink-900: 244 247 251; /* strongest text */
+
+  /* Tinted backgrounds have to become deep washes, not pale ones, or
+     they glare against the dark surfaces around them. */
+  --brand-50: 26 33 61;
+  --brand-100: 33 43 80;
+  --accent-50: 37 28 66;
+  --accent-100: 48 36 86;
 }
 
 html,
 body {
-  background-color: #f7f8fa; /* ink-50 */
+  background-color: rgb(var(--ink-50));
   -webkit-font-smoothing: antialiased;
 }
 
@@ -45,6 +103,16 @@ body {
   box-shadow:
     0 1px 0 0 rgb(255 255 255 / 0.9) inset,
     0 10px 30px -12px rgb(16 24 40 / 0.18);
+}
+
+/* In dark mode frosted glass is a translucent dark pane catching a little
+   light from above — a white sheen would read as a bright smear. */
+.dark .glass {
+  background: linear-gradient(135deg, rgb(40 46 61 / 0.75) 0%, rgb(26 30 39 / 0.6) 100%);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow:
+    0 1px 0 0 rgb(255 255 255 / 0.06) inset,
+    0 10px 30px -12px rgb(0 0 0 / 0.5);
 }
 
 .glass-dark {
@@ -94,12 +162,35 @@ body {
 
 /* --- Ambient gradient orbs used behind the hero. Blurred to the point
    of being light rather than shapes, so text stays readable. --- */
+/* A large blurred element is genuinely expensive to composite — the
+   browser rasterises the whole blurred area every frame it changes. Two
+   things keep these cheap: `will-change: transform` promotes each orb to
+   its own GPU layer so animating it never repaints the page behind it,
+   and `contain: strict` tells the browser nothing inside can affect
+   layout elsewhere, so it can skip a lot of work. Without these, three
+   drifting orbs visibly cost frames on a mid-range phone. */
 .orb {
   position: absolute;
   border-radius: 9999px;
-  filter: blur(72px);
-  opacity: 0.55;
+  filter: blur(64px);
+  opacity: 0.5;
   pointer-events: none;
+  will-change: transform;
+  contain: strict;
+}
+
+/* Dark mode needs far less of this: bright colour blooming through a dark
+   page reads as glare rather than depth. */
+.dark .orb {
+  opacity: 0.28;
+}
+
+/* Phones are where this costs the most and shows the least — the orbs are
+   largely hidden behind content on a narrow screen anyway. */
+@media (max-width: 640px) {
+  .orb {
+    display: none;
+  }
 }
 
 @keyframes float-slow {

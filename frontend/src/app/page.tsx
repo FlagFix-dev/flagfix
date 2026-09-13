@@ -78,7 +78,7 @@ export default function HomePage() {
   }, [initializing, claims, router]);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-brand-50 via-white to-white">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-brand-50 via-ink-50 to-ink-50">
       {/* Ambient depth behind the hero — soft, slow-drifting colour that
           gives the page a sense of space without competing with text. */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-[720px] overflow-hidden">
@@ -136,7 +136,7 @@ export default function HomePage() {
             <div
               key={f.title}
               style={{ animationDelay: `${i * 70}ms` }}
-              className="tilt-card animate-fade-up rounded-2xl border border-ink-100 bg-white p-5 shadow-card"
+              className="tilt-card animate-fade-up rounded-2xl border border-ink-100 bg-surface p-5 shadow-card"
             >
               <h3 className="text-sm font-semibold text-ink-900">{f.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-ink-600">{f.body}</p>
@@ -170,7 +170,7 @@ export default function HomePage() {
                 <div
                   key={t}
                   style={{ animationDelay: `${i * 80}ms` }}
-                  className="animate-fade-up rounded-xl border border-ink-100 bg-white px-4 py-2.5 text-sm text-ink-700 shadow-card"
+                  className="animate-fade-up rounded-xl border border-ink-100 bg-surface px-4 py-2.5 text-sm text-ink-700 shadow-card"
                 >
                   "{t}"
                 </div>
@@ -203,8 +203,8 @@ export default function HomePage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2 pt-1">
-                  <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs">IT department</span>
-                  <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs">High priority</span>
+                  <span className="rounded-full bg-surface/15 px-2.5 py-0.5 text-xs">IT department</span>
+                  <span className="rounded-full bg-surface/15 px-2.5 py-0.5 text-xs">High priority</span>
                   <span className="rounded-full bg-red-400/30 px-2.5 py-0.5 text-xs">SLA at risk</span>
                 </div>
               </CardBody>
@@ -227,7 +227,7 @@ export default function HomePage() {
 
           <div className="tilt-parent mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {AI_STEPS.map((s) => (
-              <Card key={s.step} elevated tilt className="bg-white">
+              <Card key={s.step} elevated tilt className="bg-surface">
                 <CardBody>
                   <span className="text-xs font-bold text-accent-500">{s.step}</span>
                   <h3 className="mt-1 text-base font-semibold text-ink-900">{s.title}</h3>
@@ -253,7 +253,7 @@ export default function HomePage() {
 
           <div className="mx-auto mt-8 max-w-2xl space-y-3">
             {FAQS.map((item, i) => (
-              <div key={item.q} className="overflow-hidden rounded-xl border border-ink-100 bg-white">
+              <div key={item.q} className="overflow-hidden rounded-xl border border-ink-100 bg-surface">
                 <button
                   type="button"
                   onClick={() => setOpenFaq(openFaq === i ? null : i)}

@@ -307,7 +307,7 @@ export default function NewReportPage() {
                 placeholder="Be specific: what's broken, how bad is it, and since when? e.g. 'The ceiling fan in Room 204 is making a loud grinding noise and sometimes stops — started yesterday evening.'"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="bg-white"
+                className="bg-surface"
               />
               <p className="mt-1 text-xs text-ink-500">
                 A clear, specific description helps our AI route this to the right team faster.
@@ -323,7 +323,7 @@ export default function NewReportPage() {
                 required
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
-                className="bg-white"
+                className="bg-surface"
               >
                 {locations === null && <option value="">Loading…</option>}
                 {locations?.map((loc) => (
@@ -353,7 +353,7 @@ export default function NewReportPage() {
                     placeholder="e.g. Staircase between 2nd and 3rd floor of the Science Block, near the fire extinguisher"
                     value={customLocation}
                     onChange={(e) => setCustomLocation(e.target.value)}
-                    className="bg-white"
+                    className="bg-surface"
                   />
                   <p className="mt-1 text-xs text-ink-600">
                     Name the building, the floor, and something nearby that doesn't move — a door
@@ -380,7 +380,7 @@ export default function NewReportPage() {
                   placeholder='e.g. "before Room 303" or "beside Room 303, near the water cooler"'
                   value={landmark}
                   onChange={(e) => setLandmark(e.target.value)}
-                  className="bg-white"
+                  className="bg-surface"
                 />
                 <p className="mt-1 text-xs text-ink-500">
                   Double-check this is the right building and floor — precise location is the #1

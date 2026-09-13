@@ -2,14 +2,23 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 
+import anyio.to_thread
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
+from app.deps import CurrentUser, get_current_user
 from app.models.enums import UserRole
 from app.models.tenancy import Organization, User, UserOrgRole
-from app.schemas.auth import LoginRequest, RefreshRequest, SignupRequest, TokenResponse
+from app.schemas.auth import (
+    LoginRequest,
+    ProfileUpdateRequest,
+    RefreshRequest,
+    SignupRequest,
+    TokenResponse,
+    UserProfile,
+)
 from app.security import (
     InvalidTokenError,
     create_access_token,
@@ -67,7 +76,11 @@ async def signup(payload: SignupRequest, session: AsyncSession = Depends(get_ses
                 "That staff code doesn't match this institution. Check with your admin for the correct code.",
             )
 
-    user = User(name=payload.name, email=payload.email, password_hash=hash_password(payload.password))
+    user = User(
+        name=payload.name,
+        email=payload.email,
+        password_hash=await anyio.to_thread.run_sync(hash_password, payload.password),
+    )
     session.add(user)
     await session.flush()
     session.add(UserOrgRole(user_id=user.id, org_id=org.id, role=role))
@@ -85,7 +98,15 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_sessi
     org = await _get_org_by_slug(session, payload.org_slug)
 
     user = (await session.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
-    if user is None or user.password_hash is None or not verify_password(payload.password, user.password_hash):
+    # bcrypt verification is deliberately slow (~250ms). Left on the event
+    # loop it blocks every other request on this worker for that whole
+    # time, so a burst of logins would stall the entire API.
+    password_ok = (
+        user is not None
+        and user.password_hash is not None
+        and await anyio.to_thread.run_sync(verify_password, payload.password, user.password_hash)
+    )
+    if not password_ok:
         # Same error for "no such user" and "wrong password" — never reveal
         # which one it was, that's an account-enumeration leak.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect email or password.")
@@ -106,6 +127,85 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_sessi
     return TokenResponse(
         access_token=create_access_token(user_id=user.id, org_id=org.id, role=role_row.role.value),
         refresh_token=create_refresh_token(user_id=user.id, org_id=org.id),
+    )
+
+
+@router.get("/me", response_model=UserProfile)
+async def get_my_profile(
+    current_user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserProfile:
+    """The signed-in person's own profile, for the account menu."""
+    row = (
+        await session.execute(
+            select(User, Organization)
+            .join(UserOrgRole, UserOrgRole.user_id == User.id)
+            .join(Organization, Organization.id == UserOrgRole.org_id)
+            .where(User.id == current_user.user_id, UserOrgRole.org_id == current_user.org_id)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Profile not found.")
+
+    user, org = row
+    return UserProfile(
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        phone=user.phone,
+        # Role comes from the verified token, which get_current_user has
+        # already decoded — no need for a second lookup.
+        role=current_user.role,
+        org_id=org.id,
+        org_name=org.name,
+        org_slug=org.slug,
+        created_at=user.created_at,
+    )
+
+
+@router.patch("/me", response_model=UserProfile)
+async def update_my_profile(
+    payload: ProfileUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserProfile:
+    """
+    Updates only the fields a person is allowed to change about themselves
+    (see ProfileUpdateRequest). Scoped to `current_user.user_id` from the
+    verified token, never to an id supplied by the client — so this cannot
+    be turned into "edit anyone's profile".
+    """
+    user = await session.get(User, current_user.user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Profile not found.")
+
+    phone = (payload.phone or "").strip() or None
+    if phone is not None:
+        # `users.phone` is globally unique, so a collision must be a clean
+        # 409 rather than an unhandled IntegrityError 500.
+        clash = (
+            await session.execute(select(User).where(User.phone == phone, User.id != user.id))
+        ).scalars().first()
+        if clash is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "That phone number is already in use by another account."
+            )
+
+    user.name = payload.name.strip()
+    user.phone = phone
+    await session.commit()
+
+    org = await session.get(Organization, current_user.org_id)
+    return UserProfile(
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        phone=user.phone,
+        role=current_user.role,
+        org_id=current_user.org_id,
+        org_name=org.name if org else "",
+        org_slug=org.slug if org else "",
+        created_at=user.created_at,
     )
 
 

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -40,8 +41,26 @@ class UserProfile(BaseModel):
     id: uuid.UUID
     name: str
     email: str | None
+    phone: str | None
     role: UserRole
     org_id: uuid.UUID
+    org_name: str
+    org_slug: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class ProfileUpdateRequest(BaseModel):
+    """What a person may change about themselves.
+
+    Deliberately excludes email: it is the login identity and is unique
+    across the whole system, so letting it be changed without a
+    verification step would let someone claim an address they don't own
+    (and lock the real owner out of signing up). Changing it belongs
+    behind email verification, which is a separate piece of work.
+    Role is likewise absent — nobody promotes themselves.
+    """
+    name: str = Field(min_length=1, max_length=150)
+    phone: str | None = Field(default=None, max_length=20)

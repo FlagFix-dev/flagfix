@@ -83,7 +83,7 @@ export default function OnboardingPage() {
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5 rounded-2xl border border-ink-100 bg-white p-6 shadow-card">
+        <form onSubmit={handleSubmit} className="space-y-5 rounded-2xl border border-ink-100 bg-surface p-6 shadow-card">
           {error && <Alert tone="error">{error}</Alert>}
 
           <div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import { PriorityBadge } from "@/components/problems/priority-badge";
 import { StatusBadge } from "@/components/problems/status-badge";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ApiError, orgsApi, problemsApi } from "@/lib/api";
+import { usePolling } from "@/lib/use-polling";
 import { ALLOWED_TRANSITIONS, STATUS_LABELS, STAFF_ROLES, formatEstimatedTime } from "@/lib/constants";
 import { formatDateTime, relativeDue } from "@/lib/utils";
 import type { LocationResponse, ProblemResponse, ProblemStatus } from "@/lib/types";
@@ -57,23 +58,42 @@ export default function ProblemDetailPage() {
   const [feedbackComment, setFeedbackComment] = useState("");
   const [submittingFeedback, setSubmittingFeedback] = useState<"yes" | "no" | null>(null);
 
+  // Tracks which report this component is currently showing. Navigating
+  // from one report to another reuses this component, so a slow response
+  // for the PREVIOUS report can land after the new one has been requested
+  // — without this guard it would overwrite the new report's data with the
+  // old one's.
+  const currentIdRef = useRef(params.id);
+
   async function load() {
+    const requestedId = params.id;
     try {
-      const [p, locs] = await Promise.all([problemsApi.get(params.id), orgsApi.listLocations()]);
+      const [p, locs] = await Promise.all([problemsApi.get(requestedId), orgsApi.listLocations()]);
+      if (currentIdRef.current !== requestedId) return; // a newer report is on screen
       setProblem(p);
       setLocations(locs);
+      setError(null);
+      setNotFound(false);
     } catch (err) {
+      if (currentIdRef.current !== requestedId) return;
       if (err instanceof ApiError && err.status === 404) setNotFound(true);
       else setError(err instanceof ApiError ? err.message : "Could not load this report.");
     }
   }
 
+  // Reset and refetch when the route switches to a different report.
   useEffect(() => {
+    currentIdRef.current = params.id;
+    setProblem(null);
+    setNotFound(false);
+    setError(null);
     load();
-    const interval = setInterval(load, REFRESH_INTERVAL_MS);
-    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
+
+  // Polls only while the tab is visible, and refetches immediately on
+  // return — see lib/use-polling.
+  usePolling(load, REFRESH_INTERVAL_MS);
 
   async function handleTransition(to: ProblemStatus) {
     setError(null);

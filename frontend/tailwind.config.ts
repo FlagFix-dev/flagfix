@@ -6,12 +6,43 @@ import type { Config } from "tailwindcss";
 // by name (bg-brand-600, text-ink-700, etc).
 const config: Config = {
   content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
+  // Theme is driven by a `dark` class on <html>, set before first paint by
+  // the inline script in app/layout.tsx (so there's no flash of the wrong
+  // theme) and toggled by the account menu.
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
+        // --- Themed tokens -------------------------------------------
+        // These resolve through CSS variables defined in globals.css, so
+        // the SAME utility class (`bg-surface`, `text-ink-900`) produces
+        // the right colour in either theme. That's why dark mode needed
+        // almost no changes to individual components: the palette moves
+        // underneath them.
+        //
+        // `ink` is a semantic scale, not a literal one: ink-900 always
+        // means "strongest text" and ink-50 always means "page
+        // background", so in dark mode the scale is inverted rather than
+        // darkened.
+        surface: "rgb(var(--surface) / <alpha-value>)",
+        ink: {
+          50: "rgb(var(--ink-50) / <alpha-value>)",
+          100: "rgb(var(--ink-100) / <alpha-value>)",
+          200: "rgb(var(--ink-200) / <alpha-value>)",
+          300: "rgb(var(--ink-300) / <alpha-value>)",
+          400: "rgb(var(--ink-400) / <alpha-value>)",
+          500: "rgb(var(--ink-500) / <alpha-value>)",
+          600: "rgb(var(--ink-600) / <alpha-value>)",
+          700: "rgb(var(--ink-700) / <alpha-value>)",
+          800: "rgb(var(--ink-800) / <alpha-value>)",
+          900: "rgb(var(--ink-900) / <alpha-value>)",
+        },
         brand: {
-          50: "#eef4ff",
-          100: "#dfe9ff",
+          // The two lightest brand steps are used as tinted backgrounds,
+          // so they have to darken in dark mode; the rest are saturated
+          // enough to read correctly on either theme.
+          50: "rgb(var(--brand-50) / <alpha-value>)",
+          100: "rgb(var(--brand-100) / <alpha-value>)",
           200: "#c1d4ff",
           300: "#9bb6ff",
           400: "#6f8fff",
@@ -20,18 +51,6 @@ const config: Config = {
           700: "#2b39ac",
           800: "#252f89",
           900: "#212a6e",
-        },
-        ink: {
-          50: "#f7f8fa",
-          100: "#eef0f4",
-          200: "#dde1e8",
-          300: "#c3c9d4",
-          400: "#98a1b3",
-          500: "#707b91",
-          600: "#545e74",
-          700: "#3f475c",
-          800: "#282e3d",
-          900: "#161a24",
         },
         severity: {
           critical: "#dc2626",
@@ -43,8 +62,8 @@ const config: Config = {
         // highlight chips, the homepage) so the palette reads as
         // "modern SaaS" rather than a single flat blue everywhere.
         accent: {
-          50: "#f4f0ff",
-          100: "#e9e0ff",
+          50: "rgb(var(--accent-50) / <alpha-value>)",
+          100: "rgb(var(--accent-100) / <alpha-value>)",
           400: "#a78bfa",
           500: "#8b5cf6",
           600: "#7c3aed",

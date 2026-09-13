@@ -168,6 +168,44 @@ export interface OrgProfileResponse {
   staff_code: string | null;
 }
 
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  role: UserRole;
+  org_id: string;
+  org_name: string;
+  org_slug: string;
+  created_at: string;
+}
+
+/** Email is deliberately not editable — it's the login identity and is
+ * globally unique, so changing it safely needs email verification. */
+export interface ProfileUpdateRequest {
+  name: string;
+  phone?: string | null;
+}
+
+export interface MemberResponse {
+  id: string;
+  name: string;
+  email: string | null;
+  role: UserRole;
+  is_active: boolean;
+  last_seen_at: string | null;
+  is_online: boolean;
+  joined_at: string;
+}
+
+export interface MemberListResponse {
+  total_students: number;
+  total_staff: number;
+  students_online: number;
+  staff_online: number;
+  members: MemberResponse[];
+}
+
 export type ClusterStatus = "open" | "resolved";
 
 export interface ClusterMemberResponse {

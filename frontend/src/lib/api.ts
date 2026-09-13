@@ -8,16 +8,19 @@ import type {
   FeedbackRequest,
   LocationCreateRequest,
   LocationResponse,
+  MemberListResponse,
   OrgCreateRequest,
   OrgProfileResponse,
   OrgStatsResponse,
   ProblemCreateRequest,
   ProblemResponse,
   ProblemStatus,
+  ProfileUpdateRequest,
   ProgressUpdateRequest,
   SelfSignupRole,
   StatusChangeRequest,
   TokenResponse,
+  UserProfile,
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -152,6 +155,11 @@ export const authApi = {
 
   login: (input: { email: string; password: string; org_slug: string }) =>
     request<TokenResponse>("/api/auth/login", { method: "POST", body: input, auth: false }),
+
+  getProfile: () => request<UserProfile>("/api/auth/me"),
+
+  updateProfile: (input: ProfileUpdateRequest) =>
+    request<UserProfile>("/api/auth/me", { method: "PATCH", body: input }),
 };
 
 // --- Organizations ------------------------------------------------------
@@ -181,6 +189,8 @@ export const orgsApi = {
     request<OrgProfileResponse>("/api/orgs/me/regenerate-staff-code", { method: "POST" }),
 
   getStats: () => request<OrgStatsResponse>("/api/orgs/stats"),
+
+  listMembers: () => request<MemberListResponse>("/api/orgs/members"),
 };
 
 // --- Problems -------------------------------------------------------------

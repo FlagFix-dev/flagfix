@@ -24,7 +24,7 @@ export function Card({ className, elevated, glass, tilt, lift, ...props }: CardP
         "rounded-2xl",
         glass
           ? "glass"
-          : cn("border bg-white", elevated ? "border-transparent shadow-raised" : "border-ink-100 shadow-card"),
+          : cn("border bg-surface", elevated ? "border-transparent shadow-raised" : "border-ink-100 shadow-card"),
         tilt && "tilt-card",
         lift && "lift-card",
         className

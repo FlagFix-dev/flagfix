@@ -1,8 +1,9 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.enums import LocationType, OrgType
+from app.models.enums import LocationType, OrgType, UserRole
 
 
 class OrgCreateRequest(BaseModel):
@@ -85,6 +86,28 @@ class OrgProfileResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class MemberResponse(BaseModel):
+    """One person in the institution, for the admin People view."""
+    id: uuid.UUID
+    name: str
+    email: str | None
+    role: UserRole
+    is_active: bool
+    last_seen_at: datetime | None
+    # Derived server-side from last_seen_at so every client agrees on what
+    # "online" means, rather than each one picking its own cutoff.
+    is_online: bool
+    joined_at: datetime
+
+
+class MemberListResponse(BaseModel):
+    total_students: int
+    total_staff: int
+    students_online: int
+    staff_online: int
+    members: list[MemberResponse]
 
 
 class OrgStatsResponse(BaseModel):

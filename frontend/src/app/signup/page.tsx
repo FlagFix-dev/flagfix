@@ -64,7 +64,7 @@ export default function SignupPage() {
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-ink-100 bg-white p-6 shadow-card">
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-ink-100 bg-surface p-6 shadow-card">
           {error && <Alert tone="error">{error}</Alert>}
 
           <div>
@@ -110,7 +110,7 @@ export default function SignupPage() {
                     "rounded-xl border px-3 py-2.5 text-left transition-colors",
                     role === opt.value
                       ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500"
-                      : "border-ink-200 bg-white hover:bg-ink-50"
+                      : "border-ink-200 bg-surface hover:bg-ink-50"
                   )}
                 >
                   <span

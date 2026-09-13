@@ -44,7 +44,7 @@ export default function LoginPage() {
           <h1 className="mt-2 text-2xl font-bold text-ink-900">Log in</h1>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-ink-100 bg-white p-6 shadow-card">
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-ink-100 bg-surface p-6 shadow-card">
           {error && <Alert tone="error">{error}</Alert>}
 
           <div>

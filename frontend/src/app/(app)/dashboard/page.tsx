@@ -72,6 +72,13 @@ export default function DashboardPage() {
     let cancelled = false;
 
     function load() {
+      // Skip the scheduled refresh entirely while the tab is in the
+      // background: a dashboard left open all day would otherwise keep
+      // querying a cross-region database for nobody to look at. The
+      // visibilitychange handler below fires an immediate catch-up fetch
+      // the moment the person returns.
+      if (document.visibilityState !== "visible") return;
+
       const fetcher = isStaff
         ? problemsApi.list({ status: statusFilter || undefined })
         : problemsApi.listMine();
@@ -99,9 +106,19 @@ export default function DashboardPage() {
 
     load();
     const interval = setInterval(load, REFRESH_INTERVAL_MS);
+
+    // Stop polling while the tab is in the background — otherwise a
+    // dashboard left open all day keeps hitting the API for nobody — and
+    // refetch immediately when the person comes back.
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") load();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [claims, isStaff, isAdmin, statusFilter]);
 

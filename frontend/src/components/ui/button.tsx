@@ -23,7 +23,7 @@ const variantClasses: Record<Variant, string> = {
     "disabled:bg-none disabled:bg-brand-300 disabled:shadow-none disabled:hover:translate-y-0"
   ),
   secondary:
-    "bg-white text-ink-800 border border-ink-200 shadow-sm hover:bg-ink-50 hover:border-ink-300 hover:shadow-card active:bg-ink-100 disabled:text-ink-400",
+    "bg-surface text-ink-800 border border-ink-200 shadow-sm hover:bg-ink-50 hover:border-ink-300 hover:shadow-card active:bg-ink-100 disabled:text-ink-400",
   ghost: "bg-transparent text-ink-700 hover:bg-ink-100 active:bg-ink-200",
   danger:
     "bg-gradient-to-br from-red-500 to-red-700 text-white shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 disabled:bg-none disabled:bg-red-300",
