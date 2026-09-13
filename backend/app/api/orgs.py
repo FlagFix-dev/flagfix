@@ -81,11 +81,7 @@ async def create_organization(
 
     # Ids are generated here rather than left to the column default, which
     # SQLAlchemy only evaluates during flush — `org.id` would still be None
-    # at the point the rows below need to reference it. Knowing both ids up
-    # front lets every row go to the database as one batch committed in a
-    # single round trip, instead of the flush-wait-flush-wait pattern a
-    # database-generated id would force. On a cross-region database each
-    # avoided round trip is a real 150-250ms off the signup wait.
+    # at the point the rows below need to reference it.
     org_id = uuid.uuid4()
     owner_id = uuid.uuid4()
 
@@ -108,9 +104,25 @@ async def create_organization(
         # so one signup doesn't freeze every other request on the worker.
         password_hash=await anyio.to_thread.run_sync(hash_password, payload.owner_password),
     )
+    # The organization row MUST be written before anything that references
+    # it. SQLAlchemy orders inserts within a flush using the dependency
+    # graph it builds from relationship() declarations — and there is no
+    # relationship between Organization and ProblemCategory/UserOrgRole,
+    # only a plain ForeignKey column. So batching all of these into a
+    # single flush let the category inserts run FIRST and fail with
+    # "org_id is not present in table organizations", which broke
+    # institution signup completely.
+    #
+    # Hence: one flush for the organization, then everything that points at
+    # it. Still fewer round trips than a row-at-a-time approach, and this
+    # ordering is explicit rather than dependent on SQLAlchemy inferring an
+    # order it has no way to infer. Covered by
+    # tests/test_org_creation.py::test_creating_an_organization_seeds_its_categories.
+    session.add(org)
+    await session.flush()
+
     session.add_all(
         [
-            org,
             owner,
             UserOrgRole(user_id=owner_id, org_id=org_id, role=UserRole.owner),
             *(
