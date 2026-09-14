@@ -1,5 +1,6 @@
 "use client";
 
+import { Logo } from "@/components/brand/logo";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -38,9 +39,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-ink-50 px-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
-          <Link href="/" className="text-lg font-semibold text-ink-900">
-            FlagFix
-          </Link>
+          <Logo href="/" size="lg" gradientId="logo-login" className="justify-center" />
           <h1 className="mt-2 text-2xl font-bold text-ink-900">Log in</h1>
         </div>
 

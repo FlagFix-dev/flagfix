@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/auth/auth-provider";
 import { useTheme } from "@/components/theme/theme-provider";
+import { Logo } from "@/components/brand/logo";
 import { useReveal, usePointerTilt, useScrolledPast } from "@/lib/use-motion";
 
 /* ---------------------------------------------------------------------
@@ -102,18 +103,6 @@ const FAQS = [
 ];
 
 /* --- Small presentational pieces ----------------------------------- */
-
-function Logo() {
-  return (
-    <Link href="/" className="group flex items-center gap-2.5 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
-      <span className="relative flex h-9 w-9 items-center justify-center rounded-[0.7rem] bg-brand-gradient text-sm font-bold text-white shadow-raised transition-transform duration-300 group-hover:-translate-y-0.5">
-        <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px rounded-t-[0.7rem] bg-white/50" />
-        F
-      </span>
-      <span className="text-[1.0625rem] font-semibold tracking-tight text-ink-900">FlagFix</span>
-    </Link>
-  );
-}
 
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -304,7 +293,7 @@ export default function HomePage() {
         className="sticky top-0 z-40 border-b border-transparent transition-colors duration-300 [&.is-stuck]:border-ink-100 [&.is-stuck]:bg-surface/80 [&.is-stuck]:backdrop-blur-xl"
       >
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <Logo />
+          <Logo href="/" gradientId="logo-header" />
 
           <nav aria-label="Primary" className="hidden items-center gap-1 md:flex">
             {[
@@ -632,7 +621,7 @@ export default function HomePage() {
       <footer className="border-t border-ink-100">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-6 px-6 py-10 sm:flex-row">
           <div className="flex flex-col items-center gap-2 sm:items-start">
-            <Logo />
+            <Logo href="/" gradientId="logo-footer" />
             <p className="text-xs text-ink-500">
               AI-assisted problem reporting for campuses, hostels and PGs.
             </p>

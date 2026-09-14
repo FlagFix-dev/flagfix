@@ -1,5 +1,6 @@
 "use client";
 
+import { LogoMark } from "@/components/brand/logo";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -42,9 +43,7 @@ export function Navbar() {
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-8">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-gradient text-xs font-bold text-white shadow-raised">
-              F
-            </div>
+            <LogoMark className="h-7 w-7" gradientId="logo-navbar" />
             <span className="text-base font-semibold text-ink-900">FlagFix</span>
           </Link>
           <nav className="hidden items-center gap-1 sm:flex">
