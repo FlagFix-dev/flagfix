@@ -261,19 +261,270 @@ body {
   animation: shine 0.9s ease-out;
 }
 
+/* ---------------------------------------------------------------------
+   Landing-page depth system.
+
+   The marketing page carries more depth than the app does, on purpose:
+   it has one job (explain the product in ten seconds) where the app has
+   to stay out of the way for hours at a time. Everything here is scoped
+   to classes the app never uses.
+
+   The rule followed throughout: motion is driven by CSS custom
+   properties that JavaScript writes at most once per animation frame.
+   Nothing below re-renders React while the pointer moves.
+   ------------------------------------------------------------------ */
+
+/* --- Progressive enhancement gate.
+
+   Reveal-on-scroll starts elements invisible, which is a trap: if the
+   script never runs, the page is blank. So the hidden state is scoped to
+   `.js`, a class the inline script in layout.tsx adds before first
+   paint. No script, no hidden state — the page just renders normally. */
+.js [data-reveal] {
+  opacity: 0;
+  transform: translateY(22px);
+}
+
+.js [data-reveal].is-revealed {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+/* --- Aurora field: three slow-moving colour washes behind the hero.
+
+   Painted as radial gradients on a single element rather than three
+   separate blurred divs — one layer means one composite, and the blur is
+   free because a radial gradient is already soft. This is what the old
+   three-orb approach cost most on mid-range phones. */
+.aurora {
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 820px;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 42% at 18% 28%, rgb(74 104 245 / 0.32) 0%, transparent 70%),
+    radial-gradient(34% 40% at 82% 18%, rgb(124 58 237 / 0.28) 0%, transparent 70%),
+    radial-gradient(44% 38% at 52% 62%, rgb(56 189 248 / 0.18) 0%, transparent 72%);
+  filter: blur(28px);
+  will-change: transform;
+  animation: aurora-drift 22s ease-in-out infinite;
+}
+
+.dark .aurora {
+  background:
+    radial-gradient(38% 42% at 18% 28%, rgb(74 104 245 / 0.26) 0%, transparent 70%),
+    radial-gradient(34% 40% at 82% 18%, rgb(139 92 246 / 0.22) 0%, transparent 70%),
+    radial-gradient(44% 38% at 52% 62%, rgb(56 189 248 / 0.12) 0%, transparent 72%);
+}
+
+@keyframes aurora-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(-3%, 2%, 0) scale(1.06);
+  }
+  66% {
+    transform: translate3d(3%, -2%, 0) scale(1.03);
+  }
+}
+
+/* --- Engineering grid, faded out toward the edges with a mask so it
+   never forms a hard rectangle against the page. --- */
+.grid-veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgb(var(--ink-900) / 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--ink-900) / 0.055) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 78% 62% at 50% 34%, #000 20%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 78% 62% at 50% 34%, #000 20%, transparent 78%);
+}
+
+/* --- Pointer-tracked 3D scene.
+
+   `--rx`/`--ry` are written by a rAF-throttled pointermove handler. The
+   transition smooths the gap between frames and, more importantly, makes
+   the return-to-centre on pointerleave glide instead of snap. --- */
+.scene {
+  perspective: 1400px;
+  perspective-origin: 50% 40%;
+}
+
+.scene-tilt {
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transform-style: preserve-3d;
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+/* Children lifted off the card plane. Because the parent preserves 3D,
+   these genuinely sit in front of it — they slide across the card as the
+   scene rotates, which is the parallax that sells the effect. A flat
+   drop-shadow can't reproduce it. */
+.depth-1 {
+  transform: translateZ(34px);
+}
+.depth-2 {
+  transform: translateZ(68px);
+}
+.depth-3 {
+  transform: translateZ(104px);
+}
+
+/* --- A slow band of light travelling across the hero panel, like a
+   screen catching a window. Ambient, not interactive. --- */
+.sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 38%,
+    rgb(255 255 255 / 0.16) 48%,
+    transparent 58%
+  );
+  background-size: 250% 100%;
+  animation: sheen-sweep 7s ease-in-out infinite;
+}
+
+@keyframes sheen-sweep {
+  0%,
+  62% {
+    background-position: 180% 0;
+  }
+  100% {
+    background-position: -60% 0;
+  }
+}
+
+/* --- Report chips drifting at slightly different rates. Staggering the
+   duration rather than the delay keeps them from ever re-syncing into a
+   single visible pulse. --- */
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -9px, 0);
+  }
+}
+
+.animate-drift {
+  animation: drift var(--drift-duration, 6s) ease-in-out infinite;
+  animation-delay: var(--drift-delay, 0s);
+  will-change: transform;
+}
+
+/* --- Conic border that rotates: one element, no extra DOM, used on the
+   single most important card so it reads as "live". --- */
+@property --halo-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.halo {
+  position: relative;
+  isolation: isolate;
+}
+
+.halo::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--halo-angle),
+    transparent 0deg,
+    rgb(124 58 237 / 0.9) 70deg,
+    rgb(74 104 245 / 0.9) 140deg,
+    transparent 210deg,
+    transparent 360deg
+  );
+  /* Mask out the middle so only the 1px ring paints — the standard way
+     to get a gradient border without a wrapper element. */
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  animation: halo-spin 6s linear infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes halo-spin {
+  to {
+    --halo-angle: 360deg;
+  }
+}
+
+/* --- Hairline divider that fades at both ends. --- */
+.hairline {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgb(var(--ink-900) / 0.12) 20%,
+    rgb(var(--ink-900) / 0.12) 80%,
+    transparent
+  );
+}
+
+/* --- Numeric text: tabular figures so counters don't jitter as digits
+   change width, and slightly tighter tracking at display sizes. --- */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.display {
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
 /* Respect the OS-level reduced-motion setting: keep the depth, drop the
-   movement. Users who set this often do so for vestibular reasons. */
+   movement. Users who set this often do so for vestibular reasons.
+
+   Note what stays: the reveal elements are forced VISIBLE rather than
+   left in their hidden start state, otherwise honouring the setting
+   would blank the page. */
 @media (prefers-reduced-motion: reduce) {
   .animate-float-slow,
   .animate-float-slower,
   .animate-fade-up,
   .animate-pulse-ring,
-  .animate-shine {
+  .animate-shine,
+  .animate-drift,
+  .aurora,
+  .halo::before,
+  .sheen::after {
     animation: none !important;
   }
 
   .tilt-card:hover,
-  .lift-card:hover {
+  .lift-card:hover,
+  .scene-tilt {
+    transform: none !important;
+  }
+
+  .js [data-reveal] {
+    opacity: 1;
     transform: none;
   }
 }

@@ -14,9 +14,17 @@ export const metadata: Metadata = {
  * that reason — a deferred script would run too late to matter. Kept
  * deliberately tiny, and wrapped in try/catch because localStorage throws
  * outright in some privacy modes.
+ *
+ * It also adds a `js` class. Reveal-on-scroll animations start elements
+ * invisible, so that hidden state is scoped to `.js` in globals.css — if
+ * scripting is off or the bundle fails to load, the class never lands and
+ * the page renders as plain, fully visible content instead of a blank
+ * screen. The class is set OUTSIDE the try block because it must apply
+ * even when localStorage throws.
  */
 const NO_FLASH_THEME_SCRIPT = `
 (function () {
+  document.documentElement.classList.add('js');
   try {
     var stored = localStorage.getItem('flagfix.theme');
     var dark = stored === 'dark' ||
