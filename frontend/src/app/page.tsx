@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/auth/auth-provider";
 import { useTheme } from "@/components/theme/theme-provider";
 import { Logo } from "@/components/brand/logo";
+import { LogoFinale } from "@/components/brand/logo-finale";
 import { useReveal, usePointerTilt, useScrolledPast } from "@/lib/use-motion";
 
 /* ---------------------------------------------------------------------
@@ -615,6 +616,9 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* ---------------- Closing sequence ---------------- */}
+        <LogoFinale />
       </main>
 
       {/* ---------------- Footer ---------------- */}

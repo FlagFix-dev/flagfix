@@ -498,6 +498,298 @@ body {
   text-wrap: balance;
 }
 
+/* ---------------------------------------------------------------------
+   Closing sequence — the mark assembling from its two halves.
+
+   Every element below runs on ONE 4.4s timeline with the same duration
+   and the same start, and each keyframe block expresses its own moment
+   as a percentage of that timeline. Two halves that must meet in the
+   middle cannot be driven by separate durations or chained delays: any
+   drift and they land apart. Sharing one duration makes the meeting
+   point structural rather than something that happens to line up.
+
+   Nothing starts until `.is-revealed` lands on the stage, which the
+   existing IntersectionObserver adds when the section scrolls into view.
+   ------------------------------------------------------------------ */
+
+.finale-stage {
+  /* How far each half parks from centre before they converge. The mark
+     is not symmetrical inside its box — the flag's ink sits right of
+     centre and the tick's ink sits left of centre — so these are not
+     mirror values. They are tuned so the two halves look evenly spread
+     on screen, which is what the eye judges, not what the box says. */
+  --park-flag: -7.5rem;
+  --park-tick: 5.5rem;
+  --piece: 6rem;
+  --cap-left: calc(50% + 9.5rem);
+  --cap-right: calc(50% + 9.5rem);
+}
+
+@media (max-width: 640px) {
+  .finale-stage {
+    --park-flag: -4.6rem;
+    --park-tick: 3.4rem;
+    --piece: 4rem;
+    --cap-left: calc(50% + 5.6rem);
+    --cap-right: calc(50% + 5.6rem);
+  }
+}
+
+/* Each half sits in its own full-size centring slot, so the animated
+   transform is a pure offset from centre with no -50% bookkeeping. */
+.finale-slot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transform-style: preserve-3d;
+}
+
+.finale-svg {
+  width: var(--piece);
+  height: var(--piece);
+  display: block;
+}
+
+.js .finale-flag,
+.js .finale-tick,
+.js .finale-cap,
+.js .finale-glow,
+.js .finale-outro {
+  opacity: 0;
+}
+
+.js .finale-stage.is-revealed .finale-flag {
+  animation: finale-flag 4.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Same 4.4s timeline as everything else, so the pole finishes retracting
+   at exactly the frame the two halves land on each other. */
+.finale-mast {
+  stroke-dasharray: 28.5 28.5;
+  stroke-dashoffset: 15;
+}
+
+.js .finale-stage.is-revealed .finale-mast {
+  animation: finale-mast 4.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes finale-mast {
+  0%,
+  68% {
+    stroke-dashoffset: 0;
+  }
+  86%,
+  100% {
+    stroke-dashoffset: 15;
+  }
+}
+
+.js .finale-stage.is-revealed .finale-tick {
+  animation: finale-tick 4.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.js .finale-stage.is-revealed .finale-cap-left {
+  animation: finale-cap-left 4.4s ease both;
+}
+
+.js .finale-stage.is-revealed .finale-cap-right {
+  animation: finale-cap-right 4.4s ease both;
+}
+
+.js .finale-stage.is-revealed .finale-glow {
+  animation: finale-glow 4.4s ease-out both;
+}
+
+/* The outro is outside the stage, so it keys off the stage's state via
+   a sibling selector rather than a hand-counted delay of its own. */
+.js .finale-stage.is-revealed ~ .finale-outro {
+  animation: finale-outro 4.4s ease-out both;
+}
+
+/* Half one: swings in from the left and parks. */
+@keyframes finale-flag {
+  0% {
+    opacity: 0;
+    transform: translate3d(-15rem, 0, -14rem) rotateY(-80deg) scale(0.9);
+  }
+  20% {
+    opacity: 1;
+    transform: translate3d(var(--park-flag), 0, 0) rotateY(0deg) scale(1);
+  }
+  68% {
+    opacity: 1;
+    transform: translate3d(var(--park-flag), 0, 0) rotateY(0deg) scale(1);
+  }
+  86% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotateY(0deg) scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotateY(0deg) scale(1);
+  }
+}
+
+/* Half two: holds off until the flag has settled, then mirrors it. */
+@keyframes finale-tick {
+  0%,
+  30% {
+    opacity: 0;
+    transform: translate3d(15rem, 0, -14rem) rotateY(80deg) scale(0.9);
+  }
+  52% {
+    opacity: 1;
+    transform: translate3d(var(--park-tick), 0, 0) rotateY(0deg) scale(1);
+  }
+  68% {
+    opacity: 1;
+    transform: translate3d(var(--park-tick), 0, 0) rotateY(0deg) scale(1);
+  }
+  86% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotateY(0deg) scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotateY(0deg) scale(1);
+  }
+}
+
+.finale-cap {
+  position: absolute;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: max-content;
+  max-width: 9rem;
+  pointer-events: none;
+}
+
+/* Caption distance from centre is its own variable rather than being
+   derived from the park offsets. The mark's ink is not centred in its
+   box, so a formula based on the box lands the caption either colliding
+   with the artwork or floating far from it — these are set by eye and
+   checked in a render. */
+.finale-cap-left {
+  right: var(--cap-left);
+  text-align: right;
+  align-items: flex-end;
+}
+
+.finale-cap-right {
+  left: var(--cap-right);
+  text-align: left;
+  align-items: flex-start;
+}
+
+.finale-cap-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: rgb(var(--ink-900));
+}
+
+.finale-cap-sub {
+  font-size: 0.7rem;
+  color: rgb(var(--ink-500));
+}
+
+@media (max-width: 640px) {
+  .finale-cap {
+    max-width: 6.5rem;
+  }
+  .finale-cap-label {
+    font-size: 0.75rem;
+  }
+  .finale-cap-sub {
+    font-size: 0.6rem;
+  }
+}
+
+/* Captions appear beside their half and clear out before the merge, so
+   the two words are never competing with the assembled mark. */
+@keyframes finale-cap-left {
+  0%,
+  14% {
+    opacity: 0;
+    transform: translate3d(-1rem, -50%, 0);
+  }
+  24%,
+  62% {
+    opacity: 1;
+    transform: translate3d(0, -50%, 0);
+  }
+  74%,
+  100% {
+    opacity: 0;
+    transform: translate3d(-0.75rem, -50%, 0);
+  }
+}
+
+@keyframes finale-cap-right {
+  0%,
+  46% {
+    opacity: 0;
+    transform: translate3d(1rem, -50%, 0);
+  }
+  56%,
+  62% {
+    opacity: 1;
+    transform: translate3d(0, -50%, 0);
+  }
+  74%,
+  100% {
+    opacity: 0;
+    transform: translate3d(0.75rem, -50%, 0);
+  }
+}
+
+/* A bloom of brand light at the instant the halves meet. */
+.finale-glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 15rem;
+  height: 15rem;
+  margin: -7.5rem 0 0 -7.5rem;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgb(124 58 237 / 0.32) 0%, transparent 68%);
+  filter: blur(22px);
+}
+
+@keyframes finale-glow {
+  0%,
+  76% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  88% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 0.28;
+    transform: scale(1);
+  }
+}
+
+@keyframes finale-outro {
+  0%,
+  84% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Respect the OS-level reduced-motion setting: keep the depth, drop the
    movement. Users who set this often do so for vestibular reasons.
 
@@ -526,5 +818,37 @@ body {
   .js [data-reveal] {
     opacity: 1;
     transform: none;
+  }
+
+  /* The closing sequence resolves to its final frame: both halves
+     stacked at centre, which is the assembled mark, with the captions
+     and the outro simply present. Suppressing the animation without
+     this would leave the whole section blank, since every element in it
+     starts at opacity 0. */
+  .js .finale-flag,
+  .js .finale-tick,
+  .js .finale-cap,
+  .js .finale-outro {
+    opacity: 1;
+    animation: none !important;
+  }
+
+  .js .finale-flag,
+  .js .finale-tick {
+    transform: none !important;
+  }
+
+  .js .finale-cap {
+    transform: translateY(-50%) !important;
+  }
+
+  .js .finale-glow {
+    opacity: 0.25;
+    animation: none !important;
+  }
+
+  .js .finale-mast {
+    stroke-dashoffset: 15;
+    animation: none !important;
   }
 }
