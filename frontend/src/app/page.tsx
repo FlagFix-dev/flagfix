@@ -406,7 +406,7 @@ export default function HomePage() {
                   key={r.text}
                   data-reveal
                   style={{ ["--reveal-delay" as string]: `${i * 70}ms` }}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-ink-100 bg-surface px-4 py-3 shadow-card"
+                  className="tilt-soft flex items-center justify-between gap-3 rounded-xl border border-ink-100 bg-surface px-4 py-3 shadow-card"
                 >
                   <span className="text-sm text-ink-700">&ldquo;{r.text}&rdquo;</span>
                   <span className="shrink-0 text-[0.68rem] text-ink-400">{r.meta}</span>
@@ -423,7 +423,7 @@ export default function HomePage() {
             </div>
 
             <div data-reveal style={{ ["--reveal-delay" as string]: "160ms" }}>
-              <div className="halo relative overflow-hidden rounded-2xl bg-brand-gradient p-6 text-white shadow-glow">
+              <div className="tilt-soft on-brand halo relative overflow-hidden rounded-2xl bg-brand-gradient p-6 text-white shadow-glow">
                 <p className="text-[0.7rem] font-medium uppercase tracking-[0.14em] text-white/70">
                   One underlying problem
                 </p>
@@ -545,11 +545,14 @@ export default function HomePage() {
             </h2>
           </div>
 
-          <div data-reveal className="mx-auto mt-12 max-w-2xl divide-y divide-ink-100 overflow-hidden rounded-2xl border border-ink-100 bg-surface">
+          <div data-reveal className="mx-auto mt-12 max-w-2xl space-y-2.5">
             {FAQS.map((item, i) => {
               const open = openFaq === i;
               return (
-                <div key={item.q}>
+                <div
+                  key={item.q}
+                  className="tilt-soft overflow-hidden rounded-xl border border-ink-100 bg-surface shadow-card"
+                >
                   <h3>
                     <button
                       type="button"
@@ -557,7 +560,7 @@ export default function HomePage() {
                       aria-expanded={open}
                       aria-controls={`faq-panel-${i}`}
                       id={`faq-button-${i}`}
-                      className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-ink-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+                      className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
                     >
                       <span className="text-sm font-medium text-ink-900">{item.q}</span>
                       <span
@@ -589,7 +592,7 @@ export default function HomePage() {
         <section className="mx-auto max-w-6xl px-6 pb-24">
           <div
             data-reveal
-            className="halo relative overflow-hidden rounded-[1.75rem] bg-brand-gradient px-8 py-14 text-center text-white shadow-glow sm:px-16"
+            className="tilt-soft on-brand halo relative overflow-hidden rounded-[1.75rem] bg-brand-gradient px-8 py-14 text-center text-white shadow-glow sm:px-16"
           >
             <div aria-hidden="true" className="absolute inset-0 opacity-25 [background-image:radial-gradient(circle_at_20%_20%,white_0,transparent_45%),radial-gradient(circle_at_80%_70%,white_0,transparent_45%)]" />
             <div className="relative">

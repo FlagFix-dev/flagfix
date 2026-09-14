@@ -147,6 +147,34 @@ body {
     0 10px 20px -12px rgb(53 73 214 / 0.22);
 }
 
+/* --- Gentle 3D for wide surfaces: list rows, the FAQ, the closing
+   band. A full `.tilt-card` rotation on something wide looks like the
+   page is bending; a small forward lean plus a lift reads as the surface
+   rising toward the cursor.
+
+   Perspective is baked into the transform rather than inherited from a
+   parent, so any row can use this without its container needing to know.
+   Each row then has its own vanishing point, which for a stack of rows
+   looks more natural than a single shared one. --- */
+.tilt-soft {
+  transition:
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tilt-soft:hover {
+  transform: perspective(900px) translateY(-3px) rotateX(2.4deg) scale(1.006);
+  box-shadow: 0 16px 30px -16px rgb(16 24 40 / 0.24);
+}
+
+/* On the gradient surfaces a neutral grey shadow reads as dirt, so the
+   lift is carried by the brand colour instead. */
+.tilt-soft.on-brand:hover {
+  box-shadow:
+    0 1px 0 0 rgb(255 255 255 / 0.18) inset,
+    0 22px 44px -18px rgb(124 58 237 / 0.6);
+}
+
 /* --- A simpler, calmer lift for surfaces that appear in long lists,
    where a full tilt would be visually noisy. --- */
 .lift-card {
@@ -280,17 +308,32 @@ body {
    script never runs, the page is blank. So the hidden state is scoped to
    `.js`, a class the inline script in layout.tsx adds before first
    paint. No script, no hidden state — the page just renders normally. */
+/* The scroll reveal moves elements with the standalone `translate`
+   property, NOT with `transform`.
+
+   This is not a style preference, it is a correctness fix. `.js
+   [data-reveal].is-revealed` carries more specificity than
+   `.tilt-card:hover`, so when the reveal used `transform: none` it won
+   the cascade and silently killed the hover tilt on every card that also
+   reveals — which, on this page, is all of them. The cards simply stopped
+   moving, with no error anywhere to say why.
+
+   `translate` and `transform` are separate properties that compose (the
+   used transform applies translate, then rotate, then scale, then
+   transform), so the reveal can own one and hover interactions can own
+   the other. No specificity contest, and no chance of the two silently
+   cancelling each other out again later. */
 .js [data-reveal] {
   opacity: 0;
-  transform: translateY(22px);
+  translate: 0 22px;
 }
 
 .js [data-reveal].is-revealed {
   opacity: 1;
-  transform: none;
+  translate: none;
   transition:
     opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+    translate 0.7s cubic-bezier(0.22, 1, 0.36, 1);
   transition-delay: var(--reveal-delay, 0ms);
 }
 
@@ -658,6 +701,38 @@ body {
   }
 }
 
+/* The replay control. Invisible by design — the artwork is the button —
+   but a real <button>, so it is reachable by keyboard and announced by a
+   screen reader instead of being a click handler bolted onto a div. */
+.finale-replay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--piece) + 2.5rem);
+  height: calc(var(--piece) + 2.5rem);
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: background-color 0.25s ease;
+  z-index: 2;
+}
+
+.finale-replay:hover {
+  background-color: rgb(124 58 237 / 0.07);
+}
+
+.finale-replay:focus-visible {
+  outline: 2px solid rgb(74 104 245);
+  outline-offset: 3px;
+}
+
+/* The hint only makes sense while there is something to replay. */
+.finale-hint {
+  transition: opacity 0.3s ease;
+}
+
 .finale-cap {
   position: absolute;
   top: 50%;
@@ -811,13 +886,14 @@ body {
 
   .tilt-card:hover,
   .lift-card:hover,
+  .tilt-soft:hover,
   .scene-tilt {
     transform: none !important;
   }
 
   .js [data-reveal] {
     opacity: 1;
-    transform: none;
+    translate: none;
   }
 
   /* The closing sequence resolves to its final frame: both halves
@@ -850,5 +926,10 @@ body {
   .js .finale-mast {
     stroke-dashoffset: 15;
     animation: none !important;
+  }
+
+  .finale-replay,
+  .finale-hint {
+    display: none;
   }
 }

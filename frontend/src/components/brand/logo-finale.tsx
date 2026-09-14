@@ -1,5 +1,7 @@
 "use client";
 
+import { useCallback, useRef } from "react";
+
 import { usePointerTilt } from "@/lib/use-motion";
 
 /**
@@ -46,7 +48,31 @@ const STROKE = {
 export function LogoFinale() {
   // Reuse of the hero's tilt: the whole stage leans toward the pointer,
   // so the assembled mark sits in the same 3D space the page opened in.
-  const stageRef = usePointerTilt(7);
+  const tiltRef = usePointerTilt(7);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Play the sequence again.
+   *
+   * Re-adding a class the element already has does nothing — the browser
+   * sees no change and the animation keeps its finished state. Removing
+   * it, reading a layout property to force the pending style change to
+   * be applied, then adding it back is what makes the browser treat this
+   * as a NEW animation. The `void el.offsetWidth` read is the whole
+   * trick, and it is why it must not be "optimised away" as a useless
+   * statement.
+   *
+   * Note this drives the same class the IntersectionObserver sets, so
+   * the replay path and the first play are the same code path — there is
+   * no second animation definition that could drift from the first.
+   */
+  const replay = useCallback(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    el.classList.remove("is-revealed");
+    void el.offsetWidth; // force reflow — see above
+    el.classList.add("is-revealed");
+  }, []);
 
   return (
     <section
@@ -57,8 +83,8 @@ export function LogoFinale() {
         How FlagFix works, in one mark
       </h2>
 
-      <div className="finale-stage scene" data-reveal>
-        <div ref={stageRef} className="scene-tilt relative h-[15rem] sm:h-[17rem]">
+      <div ref={stageRef} className="finale-stage scene" data-reveal>
+        <div ref={tiltRef} className="scene-tilt relative h-[15rem] sm:h-[17rem]">
           {/* Glow that blooms at the moment the halves meet. */}
           <div aria-hidden="true" className="finale-glow" />
 
@@ -101,6 +127,18 @@ export function LogoFinale() {
             </div>
           </div>
 
+          {/* Replay control, centred on where the assembled mark comes
+              to rest, so clicking the logo is what restarts it. The two
+              halves are pointer-events:none, so this is the only thing
+              under the cursor there. */}
+          <button
+            type="button"
+            onClick={replay}
+            className="finale-replay"
+            aria-label="Play the FlagFix animation again"
+            title="Play again"
+          />
+
           {/* Captions. Each is tied to the same 4.4s timeline as the half
               it belongs to, rather than to its own timer. */}
           <p className="finale-cap finale-cap-left">
@@ -124,6 +162,11 @@ export function LogoFinale() {
         </p>
         <p className="mt-3 text-xs uppercase tracking-[0.18em] text-ink-400">
           Raise it. Track it. Close it.
+        </p>
+        {/* Hidden from assistive tech: the button above already carries a
+            label, so announcing this too would just repeat it. */}
+        <p aria-hidden="true" className="finale-hint mt-6 text-[0.7rem] text-ink-400">
+          Click the mark to play it again
         </p>
       </div>
     </section>
