@@ -43,6 +43,14 @@ export interface JwtPayload {
   type: "access" | "refresh";
 }
 
+/** One block/building/wing named during onboarding. `floors`, when set,
+ * creates that many Floor locations under the block — asked only of
+ * hostels and PGs (see lib/terminology.ts). */
+export interface BlockInput {
+  name: string;
+  floors?: number | null;
+}
+
 export interface OrgCreateRequest {
   org_name: string;
   org_slug: string;
@@ -50,10 +58,24 @@ export interface OrgCreateRequest {
   address: string;
   city: string;
   state: string;
+  pincode?: string | null;
   num_blocks?: number | null;
+  blocks?: BlockInput[];
   owner_name: string;
   owner_email: string;
   owner_password: string;
+}
+
+/** Returned by POST /api/orgs. Carries the tokens that log the new owner
+ * in, plus everything the "your workspace is ready" screen has to show
+ * them before they navigate away. */
+export interface OrgCreateResponse extends TokenResponse {
+  org_id: string;
+  org_name: string;
+  org_slug: string;
+  org_type: OrgType;
+  staff_code: string | null;
+  blocks_created: number;
 }
 
 /** The two roles a person can claim for themselves on the signup form.

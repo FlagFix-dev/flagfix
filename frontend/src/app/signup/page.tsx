@@ -3,7 +3,7 @@
 import { Logo } from "@/components/brand/logo";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +23,20 @@ export default function SignupPage() {
   const router = useRouter();
 
   const [orgSlug, setOrgSlug] = useState("");
+
+  // The join link produced at the end of onboarding carries the workspace
+  // in a query parameter, so the person following it never has to be told
+  // the slug separately.
+  //
+  // Read from window.location rather than useSearchParams(): that hook
+  // opts the whole route out of static prerendering unless it is wrapped
+  // in a Suspense boundary, which is a build-time failure that would not
+  // be obvious from this line. An effect costs one render and needs no
+  // such ceremony.
+  useEffect(() => {
+    const fromLink = new URLSearchParams(window.location.search).get("org");
+    if (fromLink) setOrgSlug(fromLink.trim().toLowerCase());
+  }, []);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

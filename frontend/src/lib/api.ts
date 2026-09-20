@@ -10,6 +10,7 @@ import type {
   LocationResponse,
   MemberListResponse,
   OrgCreateRequest,
+  OrgCreateResponse,
   OrgProfileResponse,
   OrgStatsResponse,
   ProblemCreateRequest,
@@ -166,7 +167,7 @@ export const authApi = {
 
 export const orgsApi = {
   create: (input: OrgCreateRequest) =>
-    request<TokenResponse>("/api/orgs", { method: "POST", body: input, auth: false }),
+    request<OrgCreateResponse>("/api/orgs", { method: "POST", body: input, auth: false }),
 
   listLocations: () => request<LocationResponse[]>("/api/orgs/locations"),
 

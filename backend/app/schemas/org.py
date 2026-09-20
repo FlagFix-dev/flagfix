@@ -6,6 +6,19 @@ from pydantic import BaseModel, EmailStr, Field
 from app.models.enums import LocationType, OrgType, UserRole
 
 
+class BlockInput(BaseModel):
+    """One block/building/wing, named by the owner during onboarding.
+
+    `floors` is asked only of the institution types where it is genuinely
+    useful (hostels and PGs, where "2nd floor" is how residents describe
+    where they are). When given, the block is created with that many Floor
+    locations underneath it, so a reporter can pick a floor on day one
+    rather than an admin having to add them later.
+    """
+    name: str = Field(min_length=1, max_length=150)
+    floors: int | None = Field(default=None, ge=0, le=100)
+
+
 class OrgCreateRequest(BaseModel):
     """The very first step of onboarding: an institution creates its
     FlagFix workspace and its own account in one step, becoming the org's
@@ -16,13 +29,50 @@ class OrgCreateRequest(BaseModel):
     address: str = Field(min_length=3, max_length=300)
     city: str = Field(min_length=1, max_length=100)
     state: str = Field(min_length=1, max_length=100)
+    # Optional at the API level even though the form asks for it: an
+    # institution abroad, or one in an area without a postal code, must
+    # still be able to sign up.
+    pincode: str | None = Field(default=None, max_length=12)
     # Descriptive only (see Organization.num_blocks) — how many blocks,
-    # buildings, or hostel wings the institution has, before they name each
-    # one individually on the Locations screen after signup.
+    # buildings, or hostel wings the institution has. When `blocks` below
+    # is supplied this is derived from it rather than trusted from the
+    # client, so the count can never disagree with the named list.
     num_blocks: int | None = Field(default=None, ge=0, le=500)
+    # The named blocks themselves, created as Location rows. Empty is
+    # fine — the onboarding wizard lets the owner skip this step and name
+    # their blocks later on the Locations screen.
+    #
+    # Capped at 200 because this arrives unauthenticated: without a bound,
+    # one request could ask the server to insert an unlimited number of
+    # rows before any account exists to hold accountable.
+    blocks: list[BlockInput] = Field(default_factory=list, max_length=200)
     owner_name: str = Field(min_length=1, max_length=150)
     owner_email: EmailStr
-    owner_password: str = Field(min_length=8, max_length=128)
+    # Capped at 72 to match SignupRequest: bcrypt ignores everything past
+    # 72 bytes, so a longer value only creates a false sense of security.
+    owner_password: str = Field(min_length=8, max_length=72)
+
+
+class OrgCreateResponse(BaseModel):
+    """Everything the "your workspace is ready" screen needs, returned by
+    the same call that creates the institution.
+
+    The tokens log the owner straight in; the rest is what they must be
+    able to copy before leaving that screen. The staff code is included
+    here — and only here among the unauthenticated endpoints — because
+    this response is only ever produced for the person who just created
+    the organisation.
+    """
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+    org_id: uuid.UUID
+    org_name: str
+    org_slug: str
+    org_type: OrgType
+    staff_code: str | None
+    blocks_created: int
 
 
 class LocationCreateRequest(BaseModel):
@@ -81,6 +131,7 @@ class OrgProfileResponse(BaseModel):
     address: str | None
     city: str | None
     state: str | None
+    pincode: str | None
     num_blocks: int | None
     staff_code: str | None
 

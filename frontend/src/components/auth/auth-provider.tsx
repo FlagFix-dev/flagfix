@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useRouter } from "next/navigation";
 import { authApi, orgsApi } from "@/lib/api";
 import { clearSession, getCurrentClaims, saveSession } from "@/lib/session";
-import type { JwtPayload, OrgCreateRequest, SelfSignupRole } from "@/lib/types";
+import type { JwtPayload, OrgCreateRequest, OrgCreateResponse, SelfSignupRole } from "@/lib/types";
 
 interface AuthContextValue {
   claims: JwtPayload | null;
@@ -20,7 +20,10 @@ interface AuthContextValue {
     role: SelfSignupRole;
     staff_code?: string | null;
   }) => Promise<void>;
-  createOrg: (input: OrgCreateRequest) => Promise<void>;
+  /** Resolves with the created organisation so the onboarding wizard can
+   * show the workspace URL and staff code on its success step without a
+   * second round trip. */
+  createOrg: (input: OrgCreateRequest) => Promise<OrgCreateResponse>;
   logout: () => void;
 }
 
@@ -51,13 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setClaims(getCurrentClaims());
       },
       async createOrg(input) {
-        const tokens = await orgsApi.create(input);
+        const created = await orgsApi.create(input);
         saveSession({
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          orgSlug: input.org_slug,
+          accessToken: created.access_token,
+          refreshToken: created.refresh_token,
+          orgSlug: created.org_slug,
         });
         setClaims(getCurrentClaims());
+        return created;
       },
       logout() {
         clearSession();

@@ -27,17 +27,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.deps import CurrentUser, get_current_user, get_tenant_db, require_role
 from app.models.catalog import ProblemCategory
-from app.models.enums import ProblemStatus, UserRole
+from app.models.enums import LocationType, ProblemStatus, UserRole
 from app.models.problem import Problem
 from app.models.tenancy import Department, Location, Organization, User, UserOrgRole
 from app.schemas.auth import TokenResponse
 from app.schemas.org import (
+    BlockInput,
     CategoryCreateRequest,
     CategoryResponse,
     DepartmentCreateRequest,
     DepartmentResponse,
     LocationCreateRequest,
     LocationResponse,
+    OrgCreateResponse,
     MemberListResponse,
     MemberResponse,
     OrgCreateRequest,
@@ -71,10 +73,82 @@ def _generate_staff_code() -> str:
     return secrets.token_hex(4).upper()  # 8 hex chars, e.g. "A1B2C3D4"
 
 
-@router.post("", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+def _build_block_locations(
+    org_id: uuid.UUID, blocks: list[BlockInput]
+) -> tuple[list[Location], list[Location]]:
+    """Turn the named blocks from onboarding into Location rows.
+
+    Returns (blocks, floors) separately because a floor must be inserted
+    after the block it points at, and keeping the two lists apart makes
+    that order visible at the call site.
+
+    On that ordering: locations is a self-referential table and a floor
+    references its block through the raw `parent_location_id` column, not
+    through the `parent` relationship. This is the same shape as the bug
+    that once broke institution signup outright (categories inserted
+    before the organization they referenced), so it was tested rather than
+    assumed — and SQLAlchemy does get it right here, because it sorts rows
+    within a self-referential table using the mapped parent/children
+    relationship on Location. That relationship is therefore load-bearing:
+    removing it would break floor creation silently. The regression test
+    test_named_blocks_and_floors_are_created_during_onboarding is what
+    would catch that.
+
+    Ids are assigned here rather than left to the column default, which is
+    only evaluated during flush: `block.id` would still be None at the
+    moment a floor needs to reference it.
+
+    Duplicate names are dropped rather than rejected. Someone typing
+    "Block A" twice in a wizard lost their place; their institution does
+    not have two identically named blocks, and failing the entire signup
+    over it would be a hostile way to say so.
+    """
+    block_rows: list[Location] = []
+    floor_rows: list[Location] = []
+    seen: set[str] = set()
+
+    for block in blocks:
+        name = block.name.strip()
+        key = name.casefold()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+
+        block_id = uuid.uuid4()
+        block_rows.append(
+            Location(
+                id=block_id,
+                org_id=org_id,
+                parent_location_id=None,
+                name=name,
+                type=LocationType.building,
+                path=name,
+            )
+        )
+
+        # Floors come only from a count the owner actually gave (hostels
+        # and PGs are asked; nobody else is), so `or 0` correctly means
+        # "not asked" and produces none.
+        for floor_number in range(1, (block.floors or 0) + 1):
+            floor_name = f"Floor {floor_number}"
+            floor_rows.append(
+                Location(
+                    id=uuid.uuid4(),
+                    org_id=org_id,
+                    parent_location_id=block_id,
+                    name=floor_name,
+                    type=LocationType.floor,
+                    path=f"{name} / {floor_name}",
+                )
+            )
+
+    return block_rows, floor_rows
+
+
+@router.post("", response_model=OrgCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_organization(
     payload: OrgCreateRequest, session: AsyncSession = Depends(get_session)
-) -> TokenResponse:
+) -> OrgCreateResponse:
     existing = await session.execute(select(Organization).where(Organization.slug == payload.org_slug))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "That workspace URL is already taken.")
@@ -85,6 +159,9 @@ async def create_organization(
     org_id = uuid.uuid4()
     owner_id = uuid.uuid4()
 
+    block_rows, floor_rows = _build_block_locations(org_id, payload.blocks)
+    named_block_count = len(block_rows)
+
     org = Organization(
         id=org_id,
         name=payload.org_name,
@@ -93,7 +170,12 @@ async def create_organization(
         address=payload.address,
         city=payload.city,
         state=payload.state,
-        num_blocks=payload.num_blocks,
+        pincode=(payload.pincode or "").strip() or None,
+        # When blocks were actually named, that list is the truth and the
+        # client's separate count is ignored — the two can otherwise drift
+        # and leave the owner looking at a dashboard claiming five blocks
+        # over a list of three.
+        num_blocks=named_block_count if payload.blocks else payload.num_blocks,
         staff_code=_generate_staff_code(),
     )
     owner = User(
@@ -129,13 +211,27 @@ async def create_organization(
                 ProblemCategory(org_id=org_id, name=name, typical_resolution_hours=hours)
                 for name, hours in _DEFAULT_CATEGORIES
             ),
+            # Blocks and their floors. Blocks are top-level, so they only
+            # depend on the organization, already flushed above. Floors
+            # depend on their block, and locations is a self-referential
+            # table — this ordering is load-bearing and was tested, not
+            # assumed: see the note on _build_block_locations.
+            *block_rows,
+            *floor_rows,
         ]
     )
+
     await session.commit()
 
-    return TokenResponse(
+    return OrgCreateResponse(
         access_token=create_access_token(user_id=owner.id, org_id=org.id, role=UserRole.owner.value),
         refresh_token=create_refresh_token(user_id=owner.id, org_id=org.id),
+        org_id=org.id,
+        org_name=org.name,
+        org_slug=org.slug,
+        org_type=org.type,
+        staff_code=org.staff_code,
+        blocks_created=named_block_count,
     )
 
 

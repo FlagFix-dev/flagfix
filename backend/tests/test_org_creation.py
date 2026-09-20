@@ -27,7 +27,8 @@ from sqlalchemy import select
 from app.db import AsyncSessionLocal
 from app.main import app
 from app.models.catalog import ProblemCategory
-from app.models.tenancy import Organization, User, UserOrgRole
+from app.models.enums import LocationType
+from app.models.tenancy import Location, Organization, User, UserOrgRole
 
 
 def _payload(**overrides):
@@ -139,3 +140,145 @@ async def test_duplicate_workspace_url_is_rejected_cleanly():
 
     assert second.status_code == 409
     assert "already taken" in second.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_named_blocks_and_floors_are_created_during_onboarding():
+    """The onboarding wizard names blocks up front, so they must exist as
+    real Locations the moment signup finishes — not as a number the owner
+    has to go and turn into locations by hand afterwards.
+
+    Floors are the delicate half: a floor points at its block through the
+    raw parent_location_id column, which SQLAlchemy's insert ordering
+    cannot see. If the blocks are not written first this fails with a
+    foreign-key violation, exactly like the original signup outage.
+    """
+    body = _payload(
+        org_type="hostel",
+        blocks=[
+            {"name": "Block A", "floors": 3},
+            {"name": "Block B", "floors": 2},
+            {"name": "Mess", "floors": None},
+        ],
+    )
+
+    async with await _client() as client:
+        response = await client.post("/api/orgs", json=body)
+
+    assert response.status_code == 201, f"signup failed: {response.status_code} {response.text}"
+    data = response.json()
+    assert data["blocks_created"] == 3
+    # The success screen shows these back to the owner; if they are absent
+    # the owner leaves without their workspace URL or staff code.
+    assert data["org_slug"] == body["org_slug"]
+    assert data["org_name"] == body["org_name"]
+    assert data["staff_code"]
+
+    async with AsyncSessionLocal() as session:
+        org = (
+            await session.execute(select(Organization).where(Organization.slug == body["org_slug"]))
+        ).scalar_one()
+        assert org.num_blocks == 3, "num_blocks must follow the named list, not a client-sent count"
+
+        locations = (
+            await session.execute(select(Location).where(Location.org_id == org.id))
+        ).scalars().all()
+
+        blocks = {l.name: l for l in locations if l.type == LocationType.building}
+        floors = [l for l in locations if l.type == LocationType.floor]
+
+        assert set(blocks) == {"Block A", "Block B", "Mess"}
+        assert len(floors) == 5, f"3 + 2 + 0 floors expected, found {len(floors)}"
+
+        # Every floor must hang off its own block, and carry a readable
+        # path — the UI shows `path`, it never walks the tree.
+        by_parent: dict[uuid.UUID, list[Location]] = {}
+        for floor in floors:
+            assert floor.parent_location_id is not None, "a floor with no block is unreachable in the picker"
+            by_parent.setdefault(floor.parent_location_id, []).append(floor)
+
+        assert len(by_parent[blocks["Block A"].id]) == 3
+        assert len(by_parent[blocks["Block B"].id]) == 2
+        assert blocks["Mess"].id not in by_parent
+
+        assert {f.path for f in by_parent[blocks["Block B"].id]} == {
+            "Block B / Floor 1",
+            "Block B / Floor 2",
+        }
+
+
+@pytest.mark.asyncio
+async def test_skipping_the_blocks_step_still_creates_the_institution():
+    """The wizard lets an owner skip naming blocks. That must produce a
+    working institution with no locations, not a failed signup."""
+    body = _payload(blocks=[], num_blocks=None)
+    body.pop("num_blocks")
+
+    async with await _client() as client:
+        response = await client.post("/api/orgs", json=body)
+
+    assert response.status_code == 201, f"{response.status_code} {response.text}"
+    assert response.json()["blocks_created"] == 0
+
+    async with AsyncSessionLocal() as session:
+        org = (
+            await session.execute(select(Organization).where(Organization.slug == body["org_slug"]))
+        ).scalar_one()
+        locations = (
+            await session.execute(select(Location).where(Location.org_id == org.id))
+        ).scalars().all()
+        assert locations == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_block_names_are_merged_not_rejected():
+    """Typing the same block twice in a wizard is a slip, not a reason to
+    throw away everything else they entered."""
+    body = _payload(
+        blocks=[
+            {"name": "Block A"},
+            {"name": "block a"},   # same block, different case
+            {"name": "  Block A "},  # same block, stray whitespace
+            {"name": "Block B"},
+        ]
+    )
+
+    async with await _client() as client:
+        response = await client.post("/api/orgs", json=body)
+
+    assert response.status_code == 201, f"{response.status_code} {response.text}"
+    assert response.json()["blocks_created"] == 2
+
+    async with AsyncSessionLocal() as session:
+        org = (
+            await session.execute(select(Organization).where(Organization.slug == body["org_slug"]))
+        ).scalar_one()
+        names = {
+            l.name
+            for l in (
+                await session.execute(select(Location).where(Location.org_id == org.id))
+            ).scalars().all()
+        }
+        assert names == {"Block A", "Block B"}
+
+
+@pytest.mark.asyncio
+async def test_pincode_is_stored_and_blank_becomes_null():
+    body = _payload(pincode="500032")
+    async with await _client() as client:
+        assert (await client.post("/api/orgs", json=body)).status_code == 201
+
+    blank = _payload(pincode="   ")
+    async with await _client() as client:
+        assert (await client.post("/api/orgs", json=blank)).status_code == 201
+
+    async with AsyncSessionLocal() as session:
+        with_code = (
+            await session.execute(select(Organization).where(Organization.slug == body["org_slug"]))
+        ).scalar_one()
+        assert with_code.pincode == "500032"
+
+        without = (
+            await session.execute(select(Organization).where(Organization.slug == blank["org_slug"]))
+        ).scalar_one()
+        assert without.pincode is None, "whitespace is not a pincode — store nothing"

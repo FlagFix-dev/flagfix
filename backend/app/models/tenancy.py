@@ -28,6 +28,10 @@ class Organization(Base, UUIDPKMixin, TimestampMixin):
     address: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
     city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     state: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # String, not integer: a postal code is an identifier, never a number
+    # to do arithmetic on, and an integer column would silently drop a
+    # leading zero.
+    pincode: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
     # How many blocks/buildings/hostels the institution has — purely
     # descriptive metadata for the owner's own reference; it does not
     # constrain how many Location rows they actually create below.
